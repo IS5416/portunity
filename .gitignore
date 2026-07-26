@@ -11,6 +11,9 @@ target/
 *.swo
 *~
 
+# Claude
+.claude/
+
 # Tauri
 port-gui/dist/
 port-gui/node_modules/
