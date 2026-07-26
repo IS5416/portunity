@@ -24,6 +24,7 @@ port-gui/      Tauri v2 + Svelte desktop app
 - When presenting options, always provide analysis, reasoning, and a recommendation. Don't just list choices.
 - When user raises a feature/question, first give your own analysis and extension suggestions, then confirm direction.
 - Use English for code, commits, docs consumed by agents. Provide Chinese translations (`.zh.md`) for human reading.
+- Every planning artifact (REQUIREMENTS.md, ROADMAP.md, research/*.md, etc.) MUST have a corresponding `.zh.md` Chinese version. Generate the `.zh.md` immediately after writing the English original.
 - Caveman mode active (full): drop articles/filler/pleasantries. Fragments OK. Code/commits: write normal.
 
 ## GSD Workflow
