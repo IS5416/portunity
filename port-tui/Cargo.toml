@@ -7,4 +7,10 @@ description = "Portunity terminal TUI — Ratatui-based port management dashboar
 
 [dependencies]
 port-core = { path = "../port-core" }
-# Will be populated after research phase
+ratatui.workspace = true
+crossterm.workspace = true
+tokio.workspace = true
+clap.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
