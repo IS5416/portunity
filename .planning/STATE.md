@@ -10,8 +10,8 @@
 |-------|-------|
 | **Milestone** | 1 |
 | **Current Phase** | 1 — TUI Port Viewer |
-| **Current Plan** | Not yet planned (TBD after `/gsd-plan-phase 1`) |
-| **Phase Status** | Not started |
+| **Current Plan** | UI-SPEC approved — ready for plan-phase |
+| **Phase Status** | UI design contract complete |
 | **Progress** | `[⬜⬜⬜⬜⬜⬜]` 0/6 phases complete |
 
 ## Accumulated Context
