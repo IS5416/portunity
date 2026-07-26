@@ -10,8 +10,8 @@
 |-------|-------|
 | **Milestone** | 1 |
 | **Current Phase** | 1 — TUI Port Viewer |
-| **Current Plan** | UI-SPEC approved — ready for plan-phase |
-| **Phase Status** | UI design contract complete |
+| **Current Plan** | UI-SPEC approved, CONTEXT captured — ready for plan-phase |
+| **Phase Status** | Context gathered (16 decisions) |
 | **Progress** | `[⬜⬜⬜⬜⬜⬜]` 0/6 phases complete |
 
 ## Accumulated Context
