@@ -26,6 +26,8 @@ port-gui/      Tauri v2 + Svelte desktop app
 - Use English for code, commits, docs consumed by agents. Provide Chinese translations (`.zh.md`) for human reading.
 - Every planning artifact (REQUIREMENTS.md, ROADMAP.md, research/*.md, etc.) MUST have a corresponding `.zh.md` Chinese version. Generate the `.zh.md` immediately after writing the English original.
 - Caveman mode active (full): drop articles/filler/pleasantries. Fragments OK. Code/commits: write normal.
+- Commit format: `type: short description` (e.g. `docs: update state`). No `Co-Authored-By` trailers, no `@xxx` author wrappers. Keep under 72-char subject unless message body is exceptionally large and needs multi-line context.
+- Rust module style: new-style (edition 2018+). Leaf modules → `module_name.rs`. Modules with sub-modules → `module_name.rs` + `module_name/` directory. No `mod.rs` files.
 
 ## GSD Workflow
 
