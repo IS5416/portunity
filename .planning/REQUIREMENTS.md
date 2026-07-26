@@ -22,7 +22,7 @@ Requirements for initial release. All features ship in one milestone, organized 
 - [ ] **SRCH-01**: User can filter ports by port number (exact or range), process name (substring), PID, protocol (TCP/UDP), and connection state
 - [ ] **SRCH-02**: User can combine multiple filter dimensions with AND/OR logic (faceted search)
 - [ ] **SRCH-03**: User can fuzzy-search across all fields with a single text input (`/` key in TUI, search bar in GUI)
-- [ ] **SRCH-04**: App auto-labels known ports (5432→PostgreSQL, 3306→MySQL, 6379→Redis, 3000→Next.js, 5173→Vite, etc.) — static mapping for ~50 common ports
+- [ ] **SRCH-04**: App auto-labels known ports (5432->PostgreSQL, 3306->MySQL, 6379->Redis, 3000->Next.js, 5173->Vite, etc.) — static mapping for ~50 common ports
 - [ ] **SRCH-05**: User can assign custom labels to ports ("my dev server", "production DB tunnel"); labels are searchable
 - [ ] **SRCH-06**: User can bookmark/favorite ports for quick access; favorites are displayed as a sidebar section or filter preset
 
@@ -55,7 +55,7 @@ Requirements for initial release. All features ship in one milestone, organized 
 - [ ] **FW-02**: User can create a new firewall rule (name, direction, action, protocol, local port, program path)
 - [ ] **FW-03**: User can delete a user-created firewall rule
 - [ ] **FW-04**: User can enable/disable a firewall rule
-- [ ] **FW-05**: User can right-click any port → "Block this port in Firewall" or "Allow this port in Firewall" — quick actions create rules with sensible defaults
+- [ ] **FW-05**: User can right-click any port -> "Block this port in Firewall" or "Allow this port in Firewall" — quick actions create rules with sensible defaults
 - [ ] **FW-06**: Firewall rule management requires admin elevation; app prompts for elevation on first firewall operation
 
 ### Export & Data (EXP)
@@ -117,71 +117,82 @@ Requirements for initial release. All features ship in one milestone, organized 
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| SCAN-01 | Pending | Pending |
-| SCAN-02 | Pending | Pending |
-| SCAN-03 | Pending | Pending |
-| SCAN-04 | Pending | Pending |
-| SCAN-05 | Pending | Pending |
-| SCAN-06 | Pending | Pending |
-| SCAN-07 | Pending | Pending |
-| SRCH-01 | Pending | Pending |
-| SRCH-02 | Pending | Pending |
-| SRCH-03 | Pending | Pending |
-| SRCH-04 | Pending | Pending |
-| SRCH-05 | Pending | Pending |
-| SRCH-06 | Pending | Pending |
-| PROC-01 | Pending | Pending |
-| PROC-02 | Pending | Pending |
-| PROC-03 | Pending | Pending |
-| PROC-04 | Pending | Pending |
-| PROC-05 | Pending | Pending |
-| PROC-06 | Pending | Pending |
-| PROC-07 | Pending | Pending |
-| HIST-01 | Pending | Pending |
-| HIST-02 | Pending | Pending |
-| HIST-03 | Pending | Pending |
-| HIST-04 | Pending | Pending |
-| TRAF-01 | Pending | Pending |
-| TRAF-02 | Pending | Pending |
-| TRAF-03 | Pending | Pending |
-| FW-01 | Pending | Pending |
-| FW-02 | Pending | Pending |
-| FW-03 | Pending | Pending |
-| FW-04 | Pending | Pending |
-| FW-05 | Pending | Pending |
-| FW-06 | Pending | Pending |
-| EXP-01 | Pending | Pending |
-| EXP-02 | Pending | Pending |
-| EXP-03 | Pending | Pending |
-| CORE-01 | Pending | Pending |
-| CORE-02 | Pending | Pending |
-| CORE-03 | Pending | Pending |
-| CORE-04 | Pending | Pending |
-| CORE-05 | Pending | Pending |
-| CORE-06 | Pending | Pending |
-| TUI-01 | Pending | Pending |
-| TUI-02 | Pending | Pending |
-| TUI-03 | Pending | Pending |
-| TUI-04 | Pending | Pending |
-| TUI-05 | Pending | Pending |
-| TUI-06 | Pending | Pending |
-| TUI-07 | Pending | Pending |
-| TUI-08 | Pending | Pending |
-| GUI-01 | Pending | Pending |
-| GUI-02 | Pending | Pending |
-| GUI-03 | Pending | Pending |
-| GUI-04 | Pending | Pending |
-| GUI-05 | Pending | Pending |
-| GUI-06 | Pending | Pending |
-| I18N-01 | Pending | Pending |
-| I18N-02 | Pending | Pending |
-| I18N-03 | Pending | Pending |
+| SCAN-01 | Phase 1 | Pending |
+| SCAN-02 | Phase 1 | Pending |
+| SCAN-03 | Phase 1 | Pending |
+| SCAN-04 | Phase 1 | Pending |
+| SCAN-05 | Phase 3 | Pending |
+| SCAN-06 | Phase 1 | Pending |
+| SCAN-07 | Phase 1 | Pending |
+| SRCH-01 | Phase 1 | Pending |
+| SRCH-02 | Phase 2 | Pending |
+| SRCH-03 | Phase 1 | Pending |
+| SRCH-04 | Phase 6 | Pending |
+| SRCH-05 | Phase 6 | Pending |
+| SRCH-06 | Phase 6 | Pending |
+| PROC-01 | Phase 2 | Pending |
+| PROC-02 | Phase 2 | Pending |
+| PROC-03 | Phase 2 | Pending |
+| PROC-04 | Phase 2 | Pending |
+| PROC-05 | Phase 2 | Pending |
+| PROC-06 | Phase 2 | Pending |
+| PROC-07 | Phase 2 | Pending |
+| HIST-01 | Phase 3 | Pending |
+| HIST-02 | Phase 3 | Pending |
+| HIST-03 | Phase 3 | Pending |
+| HIST-04 | Phase 3 | Pending |
+| TRAF-01 | Phase 3 | Pending |
+| TRAF-02 | Phase 3 | Pending |
+| TRAF-03 | Phase 3 | Pending |
+| FW-01 | Phase 4 | Pending |
+| FW-02 | Phase 4 | Pending |
+| FW-03 | Phase 4 | Pending |
+| FW-04 | Phase 4 | Pending |
+| FW-05 | Phase 4 | Pending |
+| FW-06 | Phase 4 | Pending |
+| EXP-01 | Phase 4 | Pending |
+| EXP-02 | Phase 4 | Pending |
+| EXP-03 | Phase 4 | Pending |
+| CORE-01 | Phase 1 | Pending |
+| CORE-02 | Phase 1 | Pending |
+| CORE-03 | Phase 3 | Pending |
+| CORE-04 | Phase 1 | Pending |
+| CORE-05 | Phase 1 | Pending |
+| CORE-06 | Phase 1 | Pending |
+| TUI-01 | Phase 1 | Pending |
+| TUI-02 | Phase 1 | Pending |
+| TUI-03 | Phase 1 | Pending |
+| TUI-04 | Phase 1 | Pending |
+| TUI-05 | Phase 6 | Pending |
+| TUI-06 | Phase 6 | Pending |
+| TUI-07 | Phase 1 | Pending |
+| TUI-08 | Phase 1 | Pending |
+| GUI-01 | Phase 5 | Pending |
+| GUI-02 | Phase 5 | Pending |
+| GUI-03 | Phase 5 | Pending |
+| GUI-04 | Phase 5 | Pending |
+| GUI-05 | Phase 6 | Pending |
+| GUI-06 | Phase 6 | Pending |
+| I18N-01 | Phase 6 | Pending |
+| I18N-02 | Phase 6 | Pending |
+| I18N-03 | Phase 6 | Pending |
 
 **Coverage:**
-- v1 requirements: 57 total
-- Mapped to phases: 0 (populated during roadmap creation)
-- Unmapped: 57
+- v1 requirements: 59 total
+- Mapped to phases: 59 (100%)
+- Unmapped: 0
+
+**Phase mapping summary:**
+
+| Phase | Count | Requirement IDs |
+|-------|-------|-----------------|
+| Phase 1 — TUI Port Viewer | 19 | CORE-01, CORE-02, CORE-04, CORE-05, CORE-06, SCAN-01, SCAN-02, SCAN-03, SCAN-04, SCAN-06, SCAN-07, SRCH-01, SRCH-03, TUI-01, TUI-02, TUI-03, TUI-04, TUI-07, TUI-08 |
+| Phase 2 — Process Management & Smart Kill | 8 | PROC-01, PROC-02, PROC-03, PROC-04, PROC-05, PROC-06, PROC-07, SRCH-02 |
+| Phase 3 — Real-Time Monitoring & History | 9 | CORE-03, SCAN-05, TRAF-01, TRAF-02, TRAF-03, HIST-01, HIST-02, HIST-03, HIST-04 |
+| Phase 4 — Firewall Management & Export | 9 | FW-01, FW-02, FW-03, FW-04, FW-05, FW-06, EXP-01, EXP-02, EXP-03 |
+| Phase 5 — Desktop GUI | 4 | GUI-01, GUI-02, GUI-03, GUI-04 |
+| Phase 6 — Polish (Labels, Favorites, Themes & i18n) | 10 | SRCH-04, SRCH-05, SRCH-06, TUI-05, TUI-06, GUI-05, GUI-06, I18N-01, I18N-02, I18N-03 |
 
 ---
 *Requirements defined: 2026-07-26*
-*Last updated: 2026-07-26 after initial definition*
+*Last updated: 2026-07-26 after roadmap creation (traceability populated)*
