@@ -19,7 +19,7 @@ pub enum Error {
 
 // Platform abstraction — Windows first, Linux/macOS extension points reserved.
 #[cfg(target_os = "windows")]
-mod windows;
+pub mod windows;
 #[cfg(not(target_os = "windows"))]
 compile_error!("Portunity currently only supports Windows. Linux/macOS support is planned.");
 
