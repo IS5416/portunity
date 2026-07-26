@@ -32,7 +32,7 @@
 **Plans:** 4 plans
 
 Plans:
-- [ ] 01-01-PLAN.md — Walking Skeleton: workspace scaffold, Windows TCP scanner, TUI event loop rendering live port table
+- [x] 01-01-PLAN.md — Walking Skeleton: workspace scaffold, Windows TCP scanner, TUI event loop rendering live port table
 - [ ] 01-02-PLAN.md — Scanner completeness (dual-stack, UDP, retry) + TUI polish (DataTable, sort, colors, keyboard nav, auto-refresh)
 - [ ] 01-03-PLAN.md — Filter engine + fuzzy search (/ key) + filter panel (f key) + admin elevation (ShellExecuteExW UAC relaunch)
 - [ ] 01-04-PLAN.md — Overview tab + placeholder tabs + tab bar interaction + resize gate (80x24 min) + release build optimization + SKELETON.md
@@ -112,7 +112,7 @@ Plans:
 
 | Phase | Requirements | Success Criteria | Status | Completed |
 |-------|-------------|-----------------|--------|-----------|
-| 1. TUI Port Viewer | 19 | 5 | Planned | - |
+| 1. TUI Port Viewer | 19 | 5 | In Progress (1/4 plans) | - |
 | 2. Process Management & Smart Kill | 8 | 5 | Not started | - |
 | 3. Real-Time Monitoring & History | 9 | 5 | Not started | - |
 | 4. Firewall Management & Export | 9 | 5 | Not started | - |

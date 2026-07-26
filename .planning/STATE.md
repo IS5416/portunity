@@ -1,8 +1,21 @@
+---
+gsd_state_version: 1.0
+milestone: v1.0
+milestone_name: milestone
+status: in_progress
+last_updated: "2026-07-26T10:58:59Z"
+progress:
+  total_phases: 1
+  completed_phases: 0
+  total_plans: 4
+  completed_plans: 1
+---
+
 # Project State: Portunity
 
 **Project:** Windows Port Management Tool
 **Core Value:** Instantly find, classify, and act on any active port and its owning process — zero friction from discovery to action.
-**Current Focus:** Roadmap defined — 6 phases within 1 milestone. Ready to plan Phase 1.
+**Current Focus:** Phase 01 — tui-port-viewer
 
 ## Current Position
 
@@ -10,8 +23,8 @@
 |-------|-------|
 | **Milestone** | 1 |
 | **Current Phase** | 1 — TUI Port Viewer |
-| **Current Plan** | 4 plans created (01-01 through 01-04) — ready for execute-phase |
-| **Phase Status** | Planned (4 waves, 19/19 requirements, VERIFIED) |
+| **Current Plan** | Plan 01-01 complete (walking skeleton). Next: Plan 01-02 (scanner completeness + TUI polish) |
+| **Phase Status** | In Progress (1/4 plans complete) |
 | **Progress** | `[⬜⬜⬜⬜⬜⬜]` 0/6 phases complete |
 
 ## Accumulated Context
@@ -30,6 +43,9 @@
 | Tab-based widget dashboard (TEA architecture) | 1 | 5 distinct function domains need dedicated canvas; TEA provides centralized state management |
 | Trait-based platform abstraction in port-core | 1 | Linux/macOS are explicit extension points (out of scope for v1) |
 | All business logic exclusively in port-core | All | Both frontends are thin adapters; anti-pattern prevention (ARCHITECTURE.md Anti-Pattern #1) |
+| windows crate v0.62 (not v0.73) | 1 | v0.73 not yet published on crates.io (July 2026). API differences: GetExtendedTcpTable returns u32 error codes, MIB_TCP_STATE is newtype, ntohs is unsafe |
+| New-style Rust module layout | 1 | Per CLAUDE.md rule ("No mod.rs files"). scanner.rs + scanner/tcp.rs (not scanner/mod.rs). Reverted plan's mod.rs references. |
+| Plan 01-01 walking skeleton complete | 1 | Workspace compiles, Windows TCP scan works, TUI renders live port table with state colors. 3 commits: a563e30, 5e0ab4a, 70ef1fe. |
 
 ### Key TODOs across phases
 
@@ -57,8 +73,8 @@
 
 ## Session Continuity
 
-- **Last action:** Roadmap created (6 phases, 59 requirements mapped)
-- **Next action:** `/gsd-plan-phase 1` to create detailed plan for Phase 1: TUI Port Viewer
+- **Last action:** Plan 01-01 executed — walking skeleton complete (3 tasks, 3 commits)
+- **Next action:** Execute Plan 01-02 (scanner completeness: dual-stack, UDP, retry; TUI polish: DataTable, sort, colors, keyboard nav, auto-refresh) — or human-verify the TUI from 01-01 tracer gate
 - **Research flags:** Phase 3 (ETW event schemas), Phase 5 (Tauri system tray + Svelte reactive stores), Phase 6 (windows-wfp API completeness, SQLite FTS5 faceted query syntax)
 
 ---
