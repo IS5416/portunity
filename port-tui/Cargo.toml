@@ -1,0 +1,10 @@
+[package]
+name = "port-tui"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Portunity terminal TUI — Ratatui-based port management dashboard"
+
+[dependencies]
+port-core = { path = "../port-core" }
+# Will be populated after research phase

@@ -1,0 +1,13 @@
+# Portunity Tauri GUI
+# This will be scaffolded by Tauri v2 CLI during implementation.
+# Placeholder to satisfy workspace parser.
+
+[package]
+name = "port-gui"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Portunity desktop GUI — Tauri v2 + Svelte port management app"
+
+[dependencies]
+port-core = { path = "../port-core" }
