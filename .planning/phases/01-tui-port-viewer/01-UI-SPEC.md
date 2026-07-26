@@ -1,7 +1,7 @@
 ---
 phase: 1
 slug: tui-port-viewer
-status: draft
+status: approved
 framework: Ratatui 0.30.2
 terminal_backend: crossterm 0.29.0
 widget_ecosystem: eddacraft-tui 0.4.0 (DataTable, ProgressBar, Spinner)
@@ -198,7 +198,7 @@ Each step ~5-8% lighter. Creates perceived depth without heavy borders. The tab 
 | Element | Heading | Body |
 |---------|---------|------|
 | No ports found | "No active ports" | "No TCP or UDP ports are currently in use. This is unusual — check if network services are running." |
-| Search returns nothing | "No results" | "No ports match '{query}'. Try adjusting your search terms or press Esc to clear." |
+| Search returns nothing | "No ports match '{query}'" | "Try adjusting your search terms or press Esc to clear." |
 | Filter has zero matches | "No matching ports" | "No ports match the current filters. Try broadening your criteria or press Esc to clear all filters." |
 | Future tab (History/Traffic/Firewall) | "Coming later" | "This tab will be available in a future phase. Press 1 or 2 to view active tabs." |
 
@@ -301,6 +301,7 @@ Per tui-design skill's four-layer keyboard model:
 | State | Visual Indicator | Active Keys |
 |-------|-----------------|-------------|
 | Tab bar focused | Active tab: Bold + `bg.surface` highlight. Inactive: Dim. | `1-5`, `←` `→`, `h` `l` |
+| Overview tab focused | Stat tiles: bold numbers as primary visual anchor. Mini table: first row auto-focused on tab entry. Admin card: `a` key hint highlighted. Focus cycles: stat tiles → mini table → admin card. Focused panel gets `bg.surface` highlight. | `Tab` cycle panels, `↑` `↓` within mini table |
 | Port list focused | One row: Reverse video highlight. Column header sort indicator: `▲`/`▼` beside sorted column. | `↑` `↓`, `j` `k`, `g` `G`, `Enter` (future drill-down) |
 | Search bar focused | Cursor blinking in input field. Search prompt: `/>_`. | Text input, `Esc` cancel, `Enter` confirm |
 | Filter panel focused | Focused field: `bg.overlay` + cursor. Other fields: `bg.surface`. | `Tab` cycle fields, `Enter` apply, `Esc` cancel |
@@ -426,7 +427,7 @@ Applicable state considerations resolved: 8 covered, 2 backstop, 0 unresolved.
 | Category | Element(s) | Status | Resolution / Reason |
 |----------|------------|--------|---------------------|
 | empty | Port table (no ports) | ✅ covered | "No active ports" empty state with body copy and suggestion. Spinner shown during scan, then transitions to empty if scan returns zero results. |
-| empty | Search results | ✅ covered | "No results" copy with query echo and Esc-to-clear hint. |
+| empty | Search results | ✅ covered | "No ports match '{query}'" heading with Esc-to-clear hint in body. |
 | empty | Filter results | ✅ covered | "No matching ports" copy with criteria-broadening hint. |
 | loading | Initial scan | ✅ covered | Spinner widget with "Scanning ports..." status bar message. Port table populates incrementally as results arrive. |
 | loading | Manual refresh | ✅ covered | Spinner replaces status bar timestamp. Existing table data remains visible (no blanking). "Scanning..." status. |
@@ -463,11 +464,11 @@ No shadcn registry applies (TUI project). This section is adapted for TUI widget
 
 ## Checker Sign-Off
 
-- [ ] Dimension 1 Copywriting: PASS
-- [ ] Dimension 2 Visuals: PASS
-- [ ] Dimension 3 Color: PASS
-- [ ] Dimension 4 Typography: PASS
-- [ ] Dimension 5 Layout & Spacing: PASS
-- [ ] Dimension 6 Widget Safety: PASS
+- [x] Dimension 1 Copywriting: PASS
+- [x] Dimension 2 Visuals: PASS
+- [x] Dimension 3 Color: PASS
+- [x] Dimension 4 Typography: PASS
+- [x] Dimension 5 Layout & Spacing: PASS
+- [x] Dimension 6 Widget Safety: PASS
 
-**Approval:** pending
+**Approval:** approved 2026-07-26
