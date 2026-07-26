@@ -29,7 +29,13 @@
   3. User presses `/` to open a fuzzy-search bar; the port table filters in real-time as they type across all fields
   4. User can apply combined filters (port number range, process name substring, PID, protocol, connection state) and see results update immediately
   5. Running without admin rights, the app still displays all ports read-only with a clear indication of which system-owned processes have limited detail; the app auto-detects when admin rights are needed and offers a UAC elevation prompt
-**Plans:** TBD
+**Plans:** 4 plans
+
+Plans:
+- [ ] 01-01-PLAN.md — Walking Skeleton: workspace scaffold, Windows TCP scanner, TUI event loop rendering live port table
+- [ ] 01-02-PLAN.md — Scanner completeness (dual-stack, UDP, retry) + TUI polish (DataTable, sort, colors, keyboard nav, auto-refresh)
+- [ ] 01-03-PLAN.md — Filter engine + fuzzy search (/ key) + filter panel (f key) + admin elevation (ShellExecuteExW UAC relaunch)
+- [ ] 01-04-PLAN.md — Overview tab + placeholder tabs + tab bar interaction + resize gate (80x24 min) + release build optimization + SKELETON.md
 **UI hint:** yes
 
 ### Phase 2: Process Management & Smart Kill
@@ -106,7 +112,7 @@
 
 | Phase | Requirements | Success Criteria | Status | Completed |
 |-------|-------------|-----------------|--------|-----------|
-| 1. TUI Port Viewer | 19 | 5 | Not started | - |
+| 1. TUI Port Viewer | 19 | 5 | Planned | - |
 | 2. Process Management & Smart Kill | 8 | 5 | Not started | - |
 | 3. Real-Time Monitoring & History | 9 | 5 | Not started | - |
 | 4. Firewall Management & Export | 9 | 5 | Not started | - |
