@@ -1,0 +1,13 @@
+{
+  "ecosystem": "windows",
+  "config": { "exa_search": false, "brave_search": false, "firecrawl": false, "tavily_search": false },
+  "questions": [
+    { "text": "What features does TCPView from Sysinternals offer for port management? What columns, filters, actions does it support?", "kind": "web" },
+    { "text": "What features does CurrPorts by NirSoft offer? How does it compare to TCPView in terms of filtering, process management, and export?", "kind": "web" },
+    { "text": "What are the key features of Windows netstat command for port inspection? What information does it show and what are its limitations?", "kind": "web" },
+    { "text": "What features does PortMaster or similar modern Windows port managers offer? What differentiates modern tools from older ones?", "kind": "web" },
+    { "text": "What features do users most frequently request or complain about missing in Windows port management tools on forums like Reddit, Stack Overflow?", "kind": "web" },
+    { "text": "What are common pitfalls and anti-features in port management and network monitoring tools? What features seem useful but cause problems?", "kind": "web" },
+    { "text": "What capabilities does Windows Resource Monitor provide for network/port inspection and process management?", "kind": "web" }
+  ]
+}
