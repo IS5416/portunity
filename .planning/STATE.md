@@ -3,12 +3,12 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: in_progress
-last_updated: "2026-07-28T10:22:33Z"
+last_updated: "2026-07-28T10:41:33Z"
 progress:
   total_phases: 1
   completed_phases: 0
   total_plans: 4
-  completed_plans: 3
+  completed_plans: 4
 ---
 
 # Project State: Portunity
@@ -22,10 +22,10 @@ progress:
 | Field | Value |
 |-------|-------|
 | **Milestone** | 1 |
-| **Current Phase** | 1 — TUI Port Viewer |
-| **Current Plan** | Plan 01-03 complete (filter + search + elevation). Next: Plan 01-04 (Overview tab + tab bar + resize gate + release build) |
-| **Phase Status** | In Progress (3/4 plans complete) |
-| **Progress** | `[⬜⬜⬜⬜⬜⬜]` 0/6 phases complete |
+| **Current Phase** | 1 — TUI Port Viewer | Complete (4/4 plans) |
+| **Current Plan** | All plans complete. Next: Phase 2 — Process Management & Smart Kill |
+| **Phase Status** | Complete |
+| **Progress** | `[██░░░░░░░░░░░░░░░░]` 1/6 phases complete |
 
 ## Accumulated Context
 
@@ -63,6 +63,11 @@ progress:
 | Admin elevation: ShellExecuteExW runas | 1 | D-06: Triggers UAC prompt. Old process exits immediately (D-08: no state transfer). User decline continues in non-admin (D-07) |
 | System process detection heuristic | 1 | PID < 1000 OR name in known set. Cosmetic dimming only — not access control. Full whitelist in Phase 2 |
 | windows-rs v0.62 API adaptation for elevation | 1 | ShellExecuteExW returns Result<()>, SHELLEXECUTEINFOW uses Anonymous union, IsUserAnAdmin in Win32::UI::Shell, SW_SHOW needs WindowsAndMessaging feature |
+| 5-tab dashboard with tab bar highlighting | 1 | active_tab: usize (0-based, 0=Overview default per D-14), per-tab Component trait dispatch, tab bar: Bold+accent_primary bg for active, Dim+fg_muted for inactive |
+| Resize gate: 80x24 minimum terminal | 1 | frame.area() checked at start of render_app(); below threshold renders centered "Terminal too small" message, hides normal layout (TUI-07) |
+| Placeholder tab pattern | 1 | History/Traffic/Firewall tabs render centered "Coming later" message with "Press 1 or 2 to view active tabs" nav hint; content deferred to Phases 3/4 |
+| Release build profile | 1 | LTO + single codegen unit + strip symbols + opt-level=3; binary size: 1.1MB (target <10MB) |
+| SKELETON.md architectural record | 1 | 227-line comprehensive document covering all 20+ Phase 1 decisions, data flow, crate graph, module map, pitfall coverage, out-of-scope map, subsequent slice plan |
 
 ### Key TODOs across phases
 
@@ -85,14 +90,14 @@ progress:
 | Memory (idle, TUI) | N/A | < 50MB | 1 |
 | TUI scroll latency (5000 rows) | N/A | < 50ms | 1 |
 | ETW events dropped | N/A | 0 under 100 conn/sec | 3 |
-| Binary size (TUI, release) | N/A | < 10MB stripped | 1 |
+| Binary size (TUI, release) | 1.1MB | < 10MB stripped | 1 | Actual: 1.1MB — well under 10MB target |
 | SQLite concurrent access | N/A | No BUSY errors, dual-frontend | 3 |
 
 ## Session Continuity
 
-- **Last action:** Plan 01-03 executed — filter engine + fuzzy search + filter panel + admin elevation (2 tasks, 2 commits: 66e332f, 22a7ced)
-- **Next action:** Execute Plan 01-04 (Overview tab + placeholder tabs + tab bar interaction + resize gate + release build + SKELETON.md)
-- **Research flags:** Phase 3 (ETW event schemas), Phase 5 (Tauri system tray + Svelte reactive stores), Phase 6 (windows-wfp API completeness, SQLite FTS5 faceted query syntax)
+- **Last action:** Plan 01-04 executed — tab system (Overview tab, 3 placeholder tabs, tab bar, resize gate) + release build optimization + SKELETON.md (2 tasks, 2 commits: fdd04a5, 2d42183)
+- **Next action:** Phase complete — transition to Phase 2 (Process Management & Smart Kill)
+- **Research flags:** Phase 2 (ProcessHandle safety wrapper, smart kill escalation, system whitelist), Phase 3 (ETW event schemas), Phase 5 (Tauri system tray + Svelte reactive stores), Phase 6 (windows-wfp API completeness, SQLite FTS5 faceted query syntax)
 
 ---
 
