@@ -48,6 +48,31 @@ impl SortOrder {
     }
 }
 
+/// Fields in the filter panel that can be edited.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FilterField {
+    PortMin,
+    PortMax,
+    ProcessName,
+    Pid,
+    Protocol,
+    State,
+}
+
+impl FilterField {
+    /// Return the next field in the tab cycle.
+    pub fn next(&self) -> Self {
+        match self {
+            Self::PortMin => Self::PortMax,
+            Self::PortMax => Self::ProcessName,
+            Self::ProcessName => Self::Pid,
+            Self::Pid => Self::Protocol,
+            Self::Protocol => Self::State,
+            Self::State => Self::PortMin,
+        }
+    }
+}
+
 #[derive(Debug)]
 pub enum Message {
     /// Quit the application.
@@ -79,4 +104,44 @@ pub enum Message {
 
     /// Jump to bottom of port list (G).
     ScrollBottom,
+
+    // --- Search messages ---
+
+    /// Append a character to the search query.
+    SearchInput(char),
+
+    /// Remove the last character from the search query.
+    SearchBackspace,
+
+    /// Clear search query and close the search bar.
+    SearchClear,
+
+    /// Open the search bar overlay.
+    SearchActivate,
+
+    /// Close the search bar overlay (Enter confirms, Esc cancels).
+    SearchDeactivate,
+
+    /// Move search cursor left.
+    SearchCursorLeft,
+
+    /// Move search cursor right.
+    SearchCursorRight,
+
+    // --- Filter messages ---
+
+    /// Open the filter panel overlay.
+    FilterActivate,
+
+    /// Close the filter panel overlay and clear filter.
+    FilterDeactivate,
+
+    /// Update a specific field in the filter panel.
+    FilterUpdateField(FilterField, String),
+
+    /// Apply the current filter criteria.
+    FilterApply,
+
+    /// Cycle to the next field in the filter panel.
+    FilterTabField,
 }

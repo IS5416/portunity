@@ -71,8 +71,53 @@ impl Component for PortsComponent {
             // Fall through to render cached data with error status bar
         }
 
-        // Empty state
-        if app.ports.is_empty() {
+        // Determine which data to display
+        let display_data = app.display_data();
+
+        // Search empty state (UI-SPEC: "No ports match '{query}'")
+        if app.search_active && !app.search_query.is_empty() && display_data.is_empty() {
+            let text = Text::from(vec![
+                Line::from(Span::styled(
+                    format!("No ports match \"{}\"", app.search_query),
+                    Style::default().fg(theme.fg_muted).bg(theme.bg_base),
+                )),
+                Line::from(""),
+                Line::from(Span::styled(
+                    "Try adjusting your search terms or press Esc to clear.",
+                    Style::default().fg(theme.fg_muted).bg(theme.bg_base),
+                )),
+            ]);
+            let paragraph = Paragraph::new(text)
+                .alignment(Alignment::Center)
+                .style(Style::default().bg(theme.bg_base))
+                .block(block);
+            f.render_widget(paragraph, area);
+            return;
+        }
+
+        // Filter empty state (UI-SPEC: "No matching ports")
+        if app.filter_active && display_data.is_empty() {
+            let text = Text::from(vec![
+                Line::from(Span::styled(
+                    "No matching ports",
+                    Style::default().fg(theme.fg_muted).bg(theme.bg_base),
+                )),
+                Line::from(""),
+                Line::from(Span::styled(
+                    "No ports match the current filters. Try broadening your criteria or press Esc to clear all filters.",
+                    Style::default().fg(theme.fg_muted).bg(theme.bg_base),
+                )),
+            ]);
+            let paragraph = Paragraph::new(text)
+                .alignment(Alignment::Center)
+                .style(Style::default().bg(theme.bg_base))
+                .block(block);
+            f.render_widget(paragraph, area);
+            return;
+        }
+
+        // Empty state (no ports at all)
+        if display_data.is_empty() {
             let text =
                 Text::from("No active ports\n\nNo TCP or UDP ports are currently in use. This is unusual \u{2014} check if network services are running.");
             let paragraph = Paragraph::new(text)
@@ -102,7 +147,7 @@ impl Component for PortsComponent {
         // Virtual scrolling: compute visible row range
         let header_rows: u16 = 1; // header row
         let available_rows = table_area.height.saturating_sub(header_rows).saturating_sub(2); // block borders
-        let total_rows = app.ports.len() as u16;
+        let total_rows = display_data.len() as u16;
 
         // Compute scroll offset to keep selected row visible
         let scroll_offset = compute_scroll_offset(
@@ -112,7 +157,7 @@ impl Component for PortsComponent {
         );
 
         let visible_start = scroll_offset as usize;
-        let visible_end = (visible_start + available_rows as usize).min(app.ports.len());
+        let visible_end = (visible_start + available_rows as usize).min(display_data.len());
 
         // Build header with sort indicators
         let header_style = Style::default()
@@ -129,8 +174,7 @@ impl Component for PortsComponent {
         .bottom_margin(0);
 
         // Build visible data rows
-        let rows: Vec<Row> = app
-            .ports
+        let rows: Vec<Row> = display_data
             .iter()
             .enumerate()
             .skip(visible_start)

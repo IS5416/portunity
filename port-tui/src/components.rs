@@ -7,8 +7,12 @@ use ratatui::layout::Rect;
 use ratatui::Frame;
 
 pub mod ports;
+pub mod search;
+pub mod filter_panel;
 
 pub use ports::PortsComponent;
+pub use search::SearchComponent;
+pub use filter_panel::FilterPanelComponent;
 
 /// Trait for renderable TUI components.
 ///

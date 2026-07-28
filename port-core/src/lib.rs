@@ -31,6 +31,7 @@ pub mod firewall;
 pub mod history;
 pub mod traffic;
 pub mod filter;
+pub use filter::*;
 pub mod store;
 pub mod config;
 

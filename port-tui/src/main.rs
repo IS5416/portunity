@@ -3,8 +3,8 @@
 //! Tab-based Widget Dashboard (TEA architecture):
 //!   [1] Overview  [2] Ports  [3] History  [4] Traffic  [5] Firewall
 //!
-//! Phase 1 skeleton: renders live TCP+UDP port table with sort,
-//! keyboard row navigation, auto-refresh, and full color mapping.
+//! Plan 01-03: interactive fuzzy search ('/'), multi-dimension filter panel ('f'),
+//! and admin elevation ('a') with context-sensitive status bar and footer.
 
 mod app;
 mod components;
@@ -29,7 +29,7 @@ use ratatui::widgets::Paragraph;
 use ratatui::{Frame, Terminal};
 
 use app::App;
-use components::{Component, PortsComponent};
+use components::{Component, FilterPanelComponent, PortsComponent, SearchComponent};
 use message::Message;
 use theme::Theme;
 use update::update;
@@ -155,8 +155,59 @@ fn run_event_loop(
 
 /// Map a crossterm KeyEvent to an optional Message.
 ///
-/// Returns None for unhandled keys.
+/// Handles mode-specific key dispatch: search mode, filter mode, and default mode.
+/// All non-overlay keys (r, q, j, k, s, etc.) pass through when search/filter is active.
 fn map_key_event(key: crossterm::event::KeyEvent, app: &App) -> Option<Message> {
+    // --- Search mode dispatch ---
+    if app.search_active {
+        match key.code {
+            KeyCode::Esc => return Some(Message::SearchDeactivate),
+            KeyCode::Enter => return Some(Message::SearchDeactivate),
+            KeyCode::Backspace => return Some(Message::SearchBackspace),
+            KeyCode::Left => return Some(Message::SearchCursorLeft),
+            KeyCode::Right => return Some(Message::SearchCursorRight),
+            KeyCode::Char(ch) => {
+                // All printable chars go to search input
+                if !ch.is_control() {
+                    return Some(Message::SearchInput(ch));
+                }
+                // Pass through control chars for universal commands
+            }
+            // Pass-through: all other keys (j, k, r, s, etc.) continue to work
+            _ => {}
+        }
+    }
+
+    // --- Filter mode dispatch ---
+    if app.filter_active {
+        match key.code {
+            KeyCode::Esc => return Some(Message::FilterDeactivate),
+            KeyCode::Enter => return Some(Message::FilterApply),
+            KeyCode::Tab => return Some(Message::FilterTabField),
+            KeyCode::BackTab => {
+                // Shift+Tab: cycle backward (send FilterTabField; we reverse by sending 5 forw cycles)
+                return Some(Message::FilterTabField);
+            }
+            KeyCode::Char(ch) => {
+                if !ch.is_control() {
+                    return Some(Message::FilterUpdateField(
+                        app.filter_focused_field.clone(),
+                        ch.to_string(),
+                    ));
+                }
+            }
+            KeyCode::Backspace => {
+                return Some(Message::FilterUpdateField(
+                    app.filter_focused_field.clone(),
+                    String::new(),
+                ));
+            }
+            // Pass-through: j, k, r, s continue to work
+            _ => {}
+        }
+    }
+
+    // --- Default mode dispatch (when no overlay is active) ---
     match key.code {
         KeyCode::Char('q') => Some(Message::Quit),
         KeyCode::Char('r') => Some(Message::Refresh),
@@ -165,10 +216,22 @@ fn map_key_event(key: crossterm::event::KeyEvent, app: &App) -> Option<Message> 
         KeyCode::Char('k') | KeyCode::Up => Some(Message::MoveUp),
         KeyCode::Char('g') => Some(Message::ScrollTop),
         KeyCode::Char('G') => Some(Message::ScrollBottom),
+        KeyCode::Char('/') => {
+            if !app.search_active && !app.filter_active {
+                Some(Message::SearchActivate)
+            } else {
+                None
+            }
+        }
+        KeyCode::Char('f') => {
+            if !app.search_active && !app.filter_active {
+                Some(Message::FilterActivate)
+            } else {
+                None
+            }
+        }
         KeyCode::Esc => {
-            // Esc clears error if present, otherwise quits
             if app.error.is_some() {
-                // Don't quit on Esc when showing error — let user retry with 'r'
                 None
             } else {
                 Some(Message::Quit)
@@ -199,14 +262,51 @@ fn render_app(f: &mut Frame, app: &App, theme: &Theme) {
     // Tab bar
     render_tab_bar(f, tab_bar_area, theme);
 
-    // Content: Ports component
-    PortsComponent.render(app, f, content_area, theme);
+    // Adjust content area for overlays: search (3 rows), filter (5 rows) stack at top
+    let overlay_offset = if app.search_active { 3u16 } else { 0u16 }
+        + if app.filter_active { 5u16 } else { 0u16 };
+
+    let table_area = if overlay_offset > 0 && content_area.height > overlay_offset {
+        Rect {
+            y: content_area.y + overlay_offset,
+            height: content_area.height.saturating_sub(overlay_offset),
+            ..content_area
+        }
+    } else {
+        content_area
+    };
+
+    // Content: Ports component (below overlays)
+    PortsComponent.render(app, f, table_area, theme);
+
+    // Overlays: search bar on top, filter panel below it
+    if app.search_active {
+        let search_overlay = Rect {
+            height: 3,
+            ..content_area
+        };
+        SearchComponent.render(app, f, search_overlay, theme);
+    }
+
+    if app.filter_active {
+        let filter_y = if app.search_active {
+            content_area.y + 3
+        } else {
+            content_area.y
+        };
+        let filter_overlay = Rect {
+            y: filter_y,
+            height: 5,
+            ..content_area
+        };
+        FilterPanelComponent.render(app, f, filter_overlay, theme);
+    }
 
     // Status bar
     render_status_bar(f, status_bar_area, app, theme);
 
     // Footer
-    render_footer(f, footer_area, theme);
+    render_footer(f, footer_area, app, theme);
 }
 
 /// Render the tab bar — static for tracer (no active tab state yet).
@@ -224,64 +324,127 @@ fn render_tab_bar(f: &mut Frame, area: Rect, theme: &Theme) {
 
 /// Render the status bar with context-sensitive message.
 fn render_status_bar(f: &mut Frame, area: Rect, app: &App, theme: &Theme) {
-    let status = if app.scanning {
-        format!(
-            "Scanning... \u{00b7} {} found so far \u{00b7} {}",
-            app.ports.len(),
-            chrono::Local::now().format("%H:%M:%S")
+    let (status, style) = if app.scanning {
+        (
+            format!(
+                "Scanning... \u{00b7} {} found so far \u{00b7} {}",
+                app.ports.len(),
+                chrono::Local::now().format("%H:%M:%S")
+            ),
+            Style::default()
+                .fg(theme.fg_default)
+                .bg(theme.bg_surface),
         )
     } else if let Some(ref e) = app.error {
-        // D-03: red error with retry hint
-        format!("\u{26a0} {} \u{00b7} Press r to retry", e)
+        (
+            format!("\u{26a0} {} \u{00b7} Press r to retry", e),
+            Style::default()
+                .fg(theme.status_error)
+                .bg(theme.bg_surface),
+        )
+    } else if app.search_active {
+        // Search takes precedence in status bar
+        (
+            format!(
+                "Search: \"{}\" \u{00b7} {} results",
+                app.search_query,
+                app.filtered_ports.len()
+            ),
+            Style::default()
+                .fg(theme.accent_primary)
+                .bg(theme.bg_surface),
+        )
+    } else if app.filter_active {
+        (
+            format!(
+                "Filtered: {} of {} ports \u{00b7} combined filter active",
+                app.filtered_ports.len(),
+                app.ports.len()
+            ),
+            Style::default()
+                .fg(theme.status_warning)
+                .bg(theme.bg_surface),
+        )
     } else {
         let now = chrono::Local::now().format("%H:%M:%S");
-        format!(
-            "Live \u{00b7} {} ports \u{00b7} {}",
-            app.ports.len(),
-            now
+        (
+            format!("Live \u{00b7} {} ports \u{00b7} {}", app.ports.len(), now),
+            Style::default()
+                .fg(theme.fg_default)
+                .bg(theme.bg_surface),
         )
-    };
-
-    let style = if app.error.is_some() {
-        Style::default()
-            .fg(theme.status_error)
-            .bg(theme.bg_surface)
-    } else {
-        Style::default()
-            .fg(theme.fg_default)
-            .bg(theme.bg_surface)
     };
 
     let paragraph = Paragraph::new(Text::from(status)).style(style);
     f.render_widget(paragraph, area);
 }
 
-/// Render the footer with keyboard shortcuts per UI-SPEC.
-fn render_footer(f: &mut Frame, area: Rect, theme: &Theme) {
+/// Render the footer with context-sensitive keyboard shortcuts per UI-SPEC.
+fn render_footer(f: &mut Frame, area: Rect, app: &App, theme: &Theme) {
     let muted = Style::default().fg(theme.fg_muted);
     let accent = Style::default()
         .fg(theme.accent_primary)
         .add_modifier(Modifier::UNDERLINED);
 
-    let line = Line::from(vec![
-        Span::styled("[\u{2191}\u{2193}jk]", accent),
-        Span::styled("Navigate", muted),
-        Span::styled(" ", muted),
-        Span::styled("[s]", accent),
-        Span::styled("Sort", muted),
-        Span::styled(" ", muted),
-        Span::styled("[r]", accent),
-        Span::styled("Refresh", muted),
-        Span::styled(" ", muted),
-        Span::styled("[q]", accent),
-        Span::styled("Quit", muted),
-        Span::styled(" ", muted),
-        Span::styled("[?]", accent),
-        Span::styled("Help", muted),
-    ]);
-
-    let footer = Paragraph::new(Text::from(line))
-        .style(Style::default().bg(theme.bg_surface))
-        .centered();
-    f.render_widget(footer, area);
+    // Context-sensitive footer per UI-SPEC
+    if app.search_active {
+        // Search mode footer
+        let line = Line::from(vec![
+            Span::styled("[Esc]", accent),
+            Span::styled("Cancel", muted),
+            Span::styled(" ", muted),
+            Span::styled("[Enter]", accent),
+            Span::styled("Confirm", muted),
+            Span::styled("  \u{2014}  fuzzy search across all fields", muted),
+        ]);
+        let footer = Paragraph::new(Text::from(line))
+            .style(Style::default().bg(theme.bg_surface))
+            .centered();
+        f.render_widget(footer, area);
+    } else if app.filter_active {
+        // Filter mode footer
+        let line = Line::from(vec![
+            Span::styled("[Esc]", accent),
+            Span::styled("Cancel", muted),
+            Span::styled(" ", muted),
+            Span::styled("[Tab]", accent),
+            Span::styled("Next field", muted),
+            Span::styled(" ", muted),
+            Span::styled("[Enter]", accent),
+            Span::styled("Apply", muted),
+            Span::styled("  \u{2014}  filter by port/PID/process/state/protocol", muted),
+        ]);
+        let footer = Paragraph::new(Text::from(line))
+            .style(Style::default().bg(theme.bg_surface))
+            .centered();
+        f.render_widget(footer, area);
+    } else {
+        // Default footer
+        let line = Line::from(vec![
+            Span::styled("[\u{2191}\u{2193}jk]", accent),
+            Span::styled("Navigate", muted),
+            Span::styled("  ", muted),
+            Span::styled("[/]", accent),
+            Span::styled("Search", muted),
+            Span::styled("  ", muted),
+            Span::styled("[f]", accent),
+            Span::styled("Filter", muted),
+            Span::styled("  ", muted),
+            Span::styled("[s]", accent),
+            Span::styled("Sort", muted),
+            Span::styled("  ", muted),
+            Span::styled("[r]", accent),
+            Span::styled("Refresh", muted),
+            Span::styled("  ", muted),
+            Span::styled("[q]", accent),
+            Span::styled("Quit", muted),
+            Span::styled("  ", muted),
+            Span::styled("[?]", accent),
+            Span::styled("Help", muted),
+        ]);
+        let footer = Paragraph::new(Text::from(line))
+            .style(Style::default().bg(theme.bg_surface))
+            .centered();
+        f.render_widget(footer, area);
+    }
 }
