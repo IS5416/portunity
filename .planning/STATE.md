@@ -3,12 +3,12 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: in_progress
-last_updated: "2026-07-26T10:58:59Z"
+last_updated: "2026-07-28T10:22:33Z"
 progress:
   total_phases: 1
   completed_phases: 0
   total_plans: 4
-  completed_plans: 2
+  completed_plans: 3
 ---
 
 # Project State: Portunity
@@ -23,8 +23,8 @@ progress:
 |-------|-------|
 | **Milestone** | 1 |
 | **Current Phase** | 1 — TUI Port Viewer |
-| **Current Plan** | Plan 01-02 complete (dual-stack scanner + TUI polish). Next: Plan 01-03 (filter + search + elevation) |
-| **Phase Status** | In Progress (2/4 plans complete) |
+| **Current Plan** | Plan 01-03 complete (filter + search + elevation). Next: Plan 01-04 (Overview tab + tab bar + resize gate + release build) |
+| **Phase Status** | In Progress (3/4 plans complete) |
 | **Progress** | `[⬜⬜⬜⬜⬜⬜]` 0/6 phases complete |
 
 ## Accumulated Context
@@ -56,6 +56,13 @@ progress:
 | Virtual scrolling (TUI-04) | 1 | Viewport-only Row rendering with right-edge scrollbar (█ thumb, │ track) |
 | Auto-refresh (D-11) | 1 | 5-second background scan; guarded: only when not scanning and no error active |
 | State column text labels | 1 | User feedback: "● LISTEN", "○ T_WAIT", "◉ C_WAIT", "— UDP" — color + text, not color alone |
+| Filter engine: free functions over trait | 1 | Filtering has no platform-specific variants; free functions are simpler and avoid unnecessary abstraction |
+| Filter: Vec-based dimensions with AND/OR logic | 1 | AND across dimensions, OR within Vec fields. More powerful than single-value design while matching existing Filter struct |
+| Fuzzy search: simple substring | 1 | Concatenated field substring match (not Levenshtein). Full fuzzy (typo-tolerant) deferred to Phase 6 with search history/ranking |
+| Non-modal search/filter overlays | 1 | Search bar and filter panel are soft overlays, not blocking modals. Keyboard navigation of port table continues while overlays are visible |
+| Admin elevation: ShellExecuteExW runas | 1 | D-06: Triggers UAC prompt. Old process exits immediately (D-08: no state transfer). User decline continues in non-admin (D-07) |
+| System process detection heuristic | 1 | PID < 1000 OR name in known set. Cosmetic dimming only — not access control. Full whitelist in Phase 2 |
+| windows-rs v0.62 API adaptation for elevation | 1 | ShellExecuteExW returns Result<()>, SHELLEXECUTEINFOW uses Anonymous union, IsUserAnAdmin in Win32::UI::Shell, SW_SHOW needs WindowsAndMessaging feature |
 
 ### Key TODOs across phases
 
@@ -83,8 +90,8 @@ progress:
 
 ## Session Continuity
 
-- **Last action:** Plan 01-02 executed — scanner completeness + TUI polish (2 tasks, 2 commits)
-- **Next action:** Execute Plan 01-03 (filter engine + fuzzy search + admin elevation) — or human-verify the TUI from 01-02
+- **Last action:** Plan 01-03 executed — filter engine + fuzzy search + filter panel + admin elevation (2 tasks, 2 commits: 66e332f, 22a7ced)
+- **Next action:** Execute Plan 01-04 (Overview tab + placeholder tabs + tab bar interaction + resize gate + release build + SKELETON.md)
 - **Research flags:** Phase 3 (ETW event schemas), Phase 5 (Tauri system tray + Svelte reactive stores), Phase 6 (windows-wfp API completeness, SQLite FTS5 faceted query syntax)
 
 ---
