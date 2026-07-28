@@ -25,6 +25,7 @@ compile_error!("Portunity currently only supports Windows. Linux/macOS support i
 
 pub mod models;
 pub mod scanner;
+pub use scanner::*;
 pub mod process;
 pub mod firewall;
 pub mod history;

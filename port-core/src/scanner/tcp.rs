@@ -1,19 +1,21 @@
-//! Windows TCP table enumeration — AF_INET GetExtendedTcpTable wrapper.
+//! Windows TCP table enumeration — dual-stack (AF_INET + AF_INET6)
+//! GetExtendedTcpTable wrapper with exponential buffer retry.
 //!
-//! Uses the two-call buffer pattern: first call gets required buffer size,
-//! second call retrieves the actual data. Includes retry for table growth
-//! between calls.
+//! Per D-01: start buffer at 16KB, double on ERROR_INSUFFICIENT_BUFFER,
+//! max 3 retries. Per D-02: enumerate both AF_INET and AF_INET6 tables,
+//! merge results, deduplicate IPv4-mapped IPv6 entries.
 
-use std::collections::HashMap;
+use std::collections::HashSet;
 
 use windows::Win32::NetworkManagement::IpHelper::{
-    GetExtendedTcpTable, MIB_TCPROW_OWNER_PID, MIB_TCPTABLE_OWNER_PID,
-    MIB_TCP_STATE_CLOSING, MIB_TCP_STATE_CLOSE_WAIT, MIB_TCP_STATE_ESTAB,
-    MIB_TCP_STATE_FIN_WAIT1, MIB_TCP_STATE_FIN_WAIT2, MIB_TCP_STATE_LAST_ACK,
-    MIB_TCP_STATE_LISTEN, MIB_TCP_STATE_SYN_RCVD, MIB_TCP_STATE_SYN_SENT,
-    MIB_TCP_STATE_TIME_WAIT, TCP_TABLE_OWNER_PID_ALL,
+    GetExtendedTcpTable, MIB_TCP6ROW_OWNER_PID, MIB_TCP6TABLE_OWNER_PID,
+    MIB_TCPROW_OWNER_PID, MIB_TCPTABLE_OWNER_PID, MIB_TCP_STATE_CLOSING,
+    MIB_TCP_STATE_CLOSE_WAIT, MIB_TCP_STATE_ESTAB, MIB_TCP_STATE_FIN_WAIT1,
+    MIB_TCP_STATE_FIN_WAIT2, MIB_TCP_STATE_LAST_ACK, MIB_TCP_STATE_LISTEN,
+    MIB_TCP_STATE_SYN_RCVD, MIB_TCP_STATE_SYN_SENT, MIB_TCP_STATE_TIME_WAIT,
+    TCP_TABLE_OWNER_PID_ALL,
 };
-use windows::Win32::Networking::WinSock::{ntohs, AF_INET};
+use windows::Win32::Networking::WinSock::{ntohs, AF_INET, AF_INET6};
 
 use crate::models::{Connection, Port, PortState, ProcessInfo, Protocol};
 
@@ -23,50 +25,27 @@ const ERROR_INSUFFICIENT_BUFFER: u32 = 122;
 /// Win32 error code for ERROR_SUCCESS / NO_ERROR.
 const NO_ERROR: u32 = 0;
 
-/// Maximum buffer retries for the two-call pattern.
-const MAX_RETRIES: usize = 2;
+/// Initial buffer size for the scan attempt (16KB per D-01).
+const INITIAL_BUFFER_SIZE: u32 = 16384;
 
-/// Raw TCP table scan using GetExtendedTcpTable with two-call pattern.
-///
+/// Maximum retries for exponential buffer growth (per D-01).
+const MAX_RETRIES: usize = 3;
+
+/// Scan the IPv4 TCP table (AF_INET) using exponential buffer retry.
 /// Returns owned copies of MIB_TCPROW_OWNER_PID rows.
-fn scan_tcp_table_raw(af: u32) -> crate::Result<Vec<MIB_TCPROW_OWNER_PID>> {
-    let mut buffer_size: u32 = 0;
+fn scan_tcp_table_raw() -> crate::Result<Vec<MIB_TCPROW_OWNER_PID>> {
+    let mut buffer_size: u32 = INITIAL_BUFFER_SIZE;
     let mut retries = 0;
 
     loop {
-        // First call: get required buffer size
-        let result = unsafe {
-            GetExtendedTcpTable(
-                None,
-                &mut buffer_size,
-                false, // sort by local port
-                af,
-                TCP_TABLE_OWNER_PID_ALL,
-                0,
-            )
-        };
-
-        if result != ERROR_INSUFFICIENT_BUFFER {
-            if result == NO_ERROR {
-                // No data — empty table
-                return Ok(Vec::new());
-            }
-            return Err(crate::Error::Platform(format!(
-                "TCP scan size query failed: error code {}",
-                result
-            )));
-        }
-
-        // Allocate buffer with returned size
         let mut buffer: Vec<u8> = vec![0u8; buffer_size as usize];
 
-        // Second call: retrieve actual data
         let result = unsafe {
             GetExtendedTcpTable(
                 Some(buffer.as_mut_ptr() as *mut _),
                 &mut buffer_size,
                 false,
-                af,
+                AF_INET.0 as u32,
                 TCP_TABLE_OWNER_PID_ALL,
                 0,
             )
@@ -77,26 +56,76 @@ fn scan_tcp_table_raw(af: u32) -> crate::Result<Vec<MIB_TCPROW_OWNER_PID>> {
             let num_entries = unsafe { (*table).dwNumEntries } as usize;
 
             let mut rows = Vec::with_capacity(num_entries);
-            let first_row = unsafe { &(*table).table[0] as *const MIB_TCPROW_OWNER_PID };
-
-            for i in 0..num_entries {
-                let row = unsafe { first_row.add(i).read() };
-                rows.push(row);
+            if num_entries > 0 {
+                let first_row =
+                    unsafe { &(*table).table[0] as *const MIB_TCPROW_OWNER_PID };
+                for i in 0..num_entries {
+                    let row = unsafe { first_row.add(i).read() };
+                    rows.push(row);
+                }
             }
-
             return Ok(rows);
         }
 
-        // Check if table grew between calls
         if result == ERROR_INSUFFICIENT_BUFFER && retries < MAX_RETRIES {
             retries += 1;
-            // Buffer size was already updated; double for retry
-            buffer_size = buffer_size.saturating_mul(2);
+            // The OS updated buffer_size to the required value.
+            // Ensure we allocate at least double previous to converge (D-01).
+            buffer_size = buffer_size.max(buffer_size.saturating_mul(2));
             continue;
         }
 
         return Err(crate::Error::Platform(format!(
-            "TCP scan data query failed after {} retries: error code {}",
+            "TCP IPv4 scan failed after {} retries: error code {}",
+            retries, result
+        )));
+    }
+}
+
+/// Scan the IPv6 TCP table (AF_INET6) using exponential buffer retry.
+/// Returns owned copies of MIB_TCP6ROW_OWNER_PID rows.
+fn scan_tcp6_table_raw() -> crate::Result<Vec<MIB_TCP6ROW_OWNER_PID>> {
+    let mut buffer_size: u32 = INITIAL_BUFFER_SIZE;
+    let mut retries = 0;
+
+    loop {
+        let mut buffer: Vec<u8> = vec![0u8; buffer_size as usize];
+
+        let result = unsafe {
+            GetExtendedTcpTable(
+                Some(buffer.as_mut_ptr() as *mut _),
+                &mut buffer_size,
+                false,
+                AF_INET6.0 as u32,
+                TCP_TABLE_OWNER_PID_ALL,
+                0,
+            )
+        };
+
+        if result == NO_ERROR {
+            let table = buffer.as_ptr() as *const MIB_TCP6TABLE_OWNER_PID;
+            let num_entries = unsafe { (*table).dwNumEntries } as usize;
+
+            let mut rows = Vec::with_capacity(num_entries);
+            if num_entries > 0 {
+                let first_row =
+                    unsafe { &(*table).table[0] as *const MIB_TCP6ROW_OWNER_PID };
+                for i in 0..num_entries {
+                    let row = unsafe { first_row.add(i).read() };
+                    rows.push(row);
+                }
+            }
+            return Ok(rows);
+        }
+
+        if result == ERROR_INSUFFICIENT_BUFFER && retries < MAX_RETRIES {
+            retries += 1;
+            buffer_size = buffer_size.max(buffer_size.saturating_mul(2));
+            continue;
+        }
+
+        return Err(crate::Error::Platform(format!(
+            "TCP IPv6 scan failed after {} retries: error code {}",
             retries, result
         )));
     }
@@ -136,96 +165,272 @@ fn format_ipv4(addr: u32) -> String {
     format!("{}.{}.{}.{}", octets[0], octets[1], octets[2], octets[3])
 }
 
+/// Format a 16-byte IPv6 address as an RFC 5952 string.
+///
+/// If the address is an IPv4-mapped IPv6 address (`::ffff:a.b.c.d`),
+/// the `is_ipv4_mapped` flag is set to true so the caller can deduplicate.
+#[allow(dead_code)]
+fn format_ipv6(addr: &[u8; 16]) -> String {
+    // Check for IPv4-mapped IPv6: first 10 bytes are 0, next 2 are 0xFF
+    let is_mapped = addr[0..10].iter().all(|&b| b == 0)
+        && addr[10] == 0xFF
+        && addr[11] == 0xFF;
+
+    if is_mapped {
+        // Format as ::ffff:a.b.c.d
+        format!(
+            "::ffff:{}.{}.{}.{}",
+            addr[12], addr[13], addr[14], addr[15]
+        )
+    } else {
+        // RFC 5952 canonical representation
+        let groups: Vec<String> = (0..8)
+            .map(|i| {
+                let hi = addr[i * 2] as u16;
+                let lo = addr[i * 2 + 1] as u16;
+                hi << 8 | lo
+            })
+            .map(|g| format!("{:x}", g))
+            .collect();
+
+        // Find longest run of zeros for :: compression
+        let mut best_start = 0;
+        let mut best_len = 0;
+        let mut cur_start = 0;
+        let mut cur_len = 0;
+
+        for (i, g) in groups.iter().enumerate() {
+            if g == "0" {
+                if cur_len == 0 {
+                    cur_start = i;
+                }
+                cur_len += 1;
+            } else {
+                if cur_len > best_len {
+                    best_start = cur_start;
+                    best_len = cur_len;
+                }
+                cur_len = 0;
+            }
+        }
+        if cur_len > best_len {
+            best_start = cur_start;
+            best_len = cur_len;
+        }
+
+        if best_len > 1 {
+            let mut result = String::new();
+            for i in 0..best_start {
+                if i > 0 {
+                    result.push(':');
+                }
+                result.push_str(&groups[i]);
+            }
+            result.push_str("::");
+            for i in (best_start + best_len)..8 {
+                result.push_str(&groups[i]);
+                if i < 7 {
+                    result.push(':');
+                }
+            }
+            // Handle edge case: all zeros
+            if best_start == 0 && best_len == 8 {
+                return "::".to_string();
+            }
+            if best_start == 0 {
+                result = format!(":{}", result);
+            }
+            result
+        } else {
+            groups.join(":")
+        }
+    }
+}
+
+/// Check if an IPv6 address (16 bytes) is an IPv4-mapped IPv6 address.
+fn is_ipv4_mapped(addr: &[u8; 16]) -> bool {
+    addr[0..10].iter().all(|&b| b == 0) && addr[10] == 0xFF && addr[11] == 0xFF
+}
+
+/// Build a Connection from MIB_TCPROW_OWNER_PID (IPv4 row).
+fn connection_from_tcp_row(
+    row: &MIB_TCPROW_OWNER_PID,
+    process_name: &str,
+) -> Connection {
+    let local_port = unsafe { ntohs(row.dwLocalPort as u16) };
+    let remote_port_raw = unsafe { ntohs(row.dwRemotePort as u16) };
+    let remote_port = if remote_port_raw == 0 {
+        None
+    } else {
+        Some(remote_port_raw)
+    };
+    let remote_addr = if row.dwRemoteAddr == 0 {
+        None
+    } else {
+        Some(format_ipv4(row.dwRemoteAddr))
+    };
+
+    let pid = row.dwOwningPid;
+    let protocol = Protocol::Tcp;
+
+    Connection {
+        port: Port {
+            number: local_port,
+            protocol,
+            state: map_tcp_state(row.dwState),
+        },
+        process: ProcessInfo {
+            pid,
+            name: process_name.to_string(),
+            executable_path: None,
+            command_line: None,
+            start_time: None,
+            is_signed: None,
+            is_system_critical: pid == 0 || pid == 4,
+            parent_pid: None,
+        },
+        remote_address: remote_addr,
+        remote_port,
+        bytes_sent: 0,
+        bytes_received: 0,
+    }
+}
+
+/// Build a Connection from MIB_TCP6ROW_OWNER_PID (IPv6 row).
+fn connection_from_tcp6_row(
+    row: &MIB_TCP6ROW_OWNER_PID,
+    process_name: &str,
+) -> Connection {
+    let local_port = unsafe { ntohs(row.dwLocalPort as u16) };
+    let remote_port_raw = unsafe { ntohs(row.dwRemotePort as u16) };
+    let remote_port = if remote_port_raw == 0 {
+        None
+    } else {
+        Some(remote_port_raw)
+    };
+
+    let pid = row.dwOwningPid;
+    let protocol = Protocol::Tcp6;
+
+    Connection {
+        port: Port {
+            number: local_port,
+            protocol,
+            state: map_tcp_state(row.dwState),
+        },
+        process: ProcessInfo {
+            pid,
+            name: process_name.to_string(),
+            executable_path: None,
+            command_line: None,
+            start_time: None,
+            is_signed: None,
+            is_system_critical: pid == 0 || pid == 4,
+            parent_pid: None,
+        },
+        remote_address: None,
+        remote_port,
+        bytes_sent: 0,
+        bytes_received: 0,
+    }
+}
+
+/// Scan all active TCP ports on the local machine (dual-stack).
+///
+/// Per D-02: calls both AF_INET and AF_INET6 tables, merges results,
+/// and deduplicates IPv4-mapped IPv6 entries. Process name resolution
+/// is handled externally by `scan_all()` in the scanner module.
+///
+/// Returns (connections, unique_pids) for batch process resolution.
+pub async fn scan_tcp() -> crate::Result<(Vec<Connection>, Vec<u32>)> {
+    tokio::task::spawn_blocking(move || {
+        // Scan both address families
+        let v4_rows = scan_tcp_table_raw()?;
+        let v6_rows = scan_tcp6_table_raw()?;
+
+        // Collect unique PIDs from both tables
+        let mut pid_set: Vec<u32> = v4_rows
+            .iter()
+            .map(|r| r.dwOwningPid)
+            .chain(v6_rows.iter().map(|r| r.dwOwningPid))
+            .collect();
+        pid_set.sort_unstable();
+        pid_set.dedup();
+
+        // Resolve process names (inline for now — caller will use ProcessResolver)
+        let names = resolve_process_names(&pid_set);
+
+        // Build IPv4 connections
+        let mut connections: Vec<Connection> = v4_rows
+            .iter()
+            .map(|row| {
+                let pid = row.dwOwningPid;
+                let name = names.get(&pid).cloned().unwrap_or_else(|| "<unknown>".to_string());
+                connection_from_tcp_row(row, &name)
+            })
+            .collect();
+
+        // Build IPv6 connections, deduplicating IPv4-mapped entries (D-02)
+        let mut seen: HashSet<(u16, Protocol)> = connections
+            .iter()
+            .map(|c| (c.port.number, c.port.protocol))
+            .collect();
+
+        for row in &v6_rows {
+            let local_port = unsafe { ntohs(row.dwLocalPort as u16) };
+
+            // D-02: an IPv4-mapped IPv6 address represents the same endpoint.
+            // Keep the AF_INET entry (canonical), drop the IPv4-mapped Tcp6 duplicate.
+            if is_ipv4_mapped(&row.ucLocalAddr) {
+                let key = (local_port, Protocol::Tcp);
+                if seen.contains(&key) {
+                    // Already have the AF_INET version — skip this duplicate.
+                    continue;
+                }
+            }
+
+            let pid = row.dwOwningPid;
+            let name = names.get(&pid).cloned().unwrap_or_else(|| "<unknown>".to_string());
+            let conn = connection_from_tcp6_row(row, &name);
+            seen.insert((conn.port.number, conn.port.protocol));
+            connections.push(conn);
+        }
+
+        Ok((connections, pid_set))
+    })
+    .await
+    .map_err(|e| crate::Error::Platform(format!("spawn_blocking failed: {}", e)))?
+}
+
 /// Resolve process names from a set of PIDs using sysinfo.
-fn resolve_process_names(pids: &[u32]) -> HashMap<u32, String> {
+///
+/// Used internally by scan_tcp. The standalone ProcessResolver in resolver.rs
+/// provides a more efficient batched approach for multi-protocol scans.
+pub(crate) fn resolve_process_names(pids: &[u32]) -> std::collections::HashMap<u32, String> {
     use sysinfo::{Pid, System};
 
     let mut system = System::new_all();
     system.refresh_all();
 
-    let mut names = HashMap::new();
+    let mut names = std::collections::HashMap::new();
 
     for &pid in pids {
         if pid == 0 {
-            names.insert(pid, "<idle>".to_string());
+            names.insert(pid, "System Idle Process".to_string());
+            continue;
+        }
+        if pid == 4 {
+            names.insert(pid, "System".to_string());
             continue;
         }
 
         let name = system
             .process(Pid::from(pid as usize))
             .map(|p| p.name().to_string_lossy().to_string())
-            .unwrap_or_else(|| "<access denied>".to_string());
+            .unwrap_or_else(|| "<unknown>".to_string());
 
         names.insert(pid, name);
     }
 
     names
-}
-
-/// Scan all active TCP ports on the local machine.
-///
-/// Calls `GetExtendedTcpTable` inside `tokio::task::spawn_blocking`
-/// to avoid blocking the async runtime. Resolves process names
-/// via `sysinfo::System` and caches by PID.
-pub async fn scan_tcp() -> crate::Result<Vec<Connection>> {
-    tokio::task::spawn_blocking(move || {
-        let rows = scan_tcp_table_raw(AF_INET.0 as u32)?;
-
-        // Collect unique PIDs for batch process name resolution
-        let mut pid_set: Vec<u32> = rows.iter().map(|r| r.dwOwningPid).collect();
-        pid_set.sort_unstable();
-        pid_set.dedup();
-
-        let process_names = resolve_process_names(&pid_set);
-
-        let connections: Vec<Connection> = rows
-            .iter()
-            .map(|row| {
-                let local_port = unsafe { ntohs(row.dwLocalPort as u16) };
-                let remote_port_raw = unsafe { ntohs(row.dwRemotePort as u16) };
-                let remote_port = if remote_port_raw == 0 {
-                    None
-                } else {
-                    Some(remote_port_raw)
-                };
-                let remote_addr = if row.dwRemoteAddr == 0 {
-                    None
-                } else {
-                    Some(format_ipv4(row.dwRemoteAddr))
-                };
-
-                let pid = row.dwOwningPid;
-                let process_name = process_names
-                    .get(&pid)
-                    .cloned()
-                    .unwrap_or_else(|| "<unknown>".to_string());
-
-                Connection {
-                    port: Port {
-                        number: local_port,
-                        protocol: Protocol::Tcp,
-                        state: map_tcp_state(row.dwState),
-                    },
-                    process: ProcessInfo {
-                        pid,
-                        name: process_name,
-                        executable_path: None,
-                        command_line: None,
-                        start_time: None,
-                        is_signed: None,
-                        is_system_critical: pid == 0 || pid == 4,
-                        parent_pid: None,
-                    },
-                    remote_address: remote_addr,
-                    remote_port,
-                    bytes_sent: 0,
-                    bytes_received: 0,
-                }
-            })
-            .collect();
-
-        Ok(connections)
-    })
-    .await
-    .map_err(|e| crate::Error::Platform(format!("spawn_blocking failed: {}", e)))?
 }

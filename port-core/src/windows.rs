@@ -1,7 +1,8 @@
 //! Windows platform implementation — IP Helper API, process resolution.
 //!
 //! Provides `WindowsPortScanner` implementing the `PortScanner` trait
-//! via `GetExtendedTcpTable` and `sysinfo` for process name resolution.
+//! via `GetExtendedTcpTable`, `GetExtendedUdpTable`, and `sysinfo`
+//! for process name resolution.
 
 use async_trait::async_trait;
 
@@ -16,9 +17,13 @@ pub struct WindowsPortScanner;
 
 #[async_trait]
 impl PortScanner for WindowsPortScanner {
-    /// Scan all active TCP ports on the local machine.
+    /// Scan all active TCP and UDP ports on the local machine.
+    ///
+    /// Delegates to `scanner::scan_all()` which runs TCP and UDP
+    /// scans concurrently via `tokio::join!` and batch-resolves
+    /// process names.
     async fn scan(&self) -> crate::Result<Vec<Connection>> {
-        crate::scanner::tcp::scan_tcp().await
+        crate::scanner::scan_all().await
     }
 
     /// Scan ports owned by a specific process.
