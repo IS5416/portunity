@@ -19,6 +19,7 @@ pub struct Theme {
     pub status_warning: Color,
     pub status_error: Color,
     pub status_info: Color,
+    pub accent_secondary: Color,
 }
 
 /// One Dark color palette.
@@ -36,6 +37,7 @@ pub fn one_dark() -> Theme {
         status_warning: Color::Rgb(229, 192, 123),
         status_error: Color::Rgb(224, 108, 117),
         status_info: Color::Rgb(86, 182, 194),
+        accent_secondary: Color::Rgb(198, 120, 221),
     }
 }
 
