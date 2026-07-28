@@ -9,10 +9,10 @@ Requirements for initial release. All features ship in one milestone, organized 
 
 ### Port Scanning (SCAN)
 
-- [ ] **SCAN-01**: User can view all active TCP ports with owning process name, PID, local address:port, remote address:port, and connection state
-- [ ] **SCAN-02**: User can view all active UDP ports with owning process name, PID, local address:port
-- [ ] **SCAN-03**: Connection states are color-coded (LISTENING=green, ESTABLISHED=blue, TIME_WAIT=gray, CLOSE_WAIT=yellow)
-- [ ] **SCAN-04**: User can sort the port table by any column (port number, PID, process name, protocol, state)
+- [x] **SCAN-01**: User can view all active TCP ports with owning process name, PID, local address:port, remote address:port, and connection state
+- [x] **SCAN-02**: User can view all active UDP ports with owning process name, PID, local address:port
+- [x] **SCAN-03**: Connection states are color-coded (LISTENING=green, ESTABLISHED=blue, TIME_WAIT=gray, CLOSE_WAIT=yellow)
+- [x] **SCAN-04**: User can sort the port table by any column (port number, PID, process name, protocol, state)
 - [ ] **SCAN-05**: Port list refreshes via ETW events (TCP connection changes); 2s polling fallback for UDP and edge cases
 - [ ] **SCAN-06**: App auto-detects when admin rights are needed and triggers UAC elevation prompt
 - [ ] **SCAN-07**: Non-admin users can view all ports read-only; system-owned processes show limited detail until elevated
@@ -76,9 +76,9 @@ Requirements for initial release. All features ship in one milestone, organized 
 ### TUI (TUI)
 
 - [ ] **TUI-01**: Tab-based Widget Dashboard: [1] Overview, [2] Ports, [3] History, [4] Traffic, [5] Firewall
-- [ ] **TUI-02**: Keyboard-first navigation: `1`-`5` switch tabs, `Tab`/`Shift+Tab` cycle panels, `/` search, `?` help overlay, `q` quit
+- [x] **TUI-02**: Keyboard-first navigation: `1`-`5` switch tabs, `Tab`/`Shift+Tab` cycle panels, `/` search, `?` help overlay, `q` quit
 - [ ] **TUI-03**: Ratatui Elm Architecture (TEA): centralized Message enum, single update() function, per-tab Component trait
-- [ ] **TUI-04**: VirtualTable for port list (prevents scroll lag at 1000+ connections)
+- [x] **TUI-04**: VirtualTable for port list (prevents scroll lag at 1000+ connections)
 - [ ] **TUI-05**: Theme system: modular, serde-deserializable theme files (TOML). Switch via `t` key. Presets: One Dark, Dracula, Solarized, Nord, Monokai, High Contrast
 - [ ] **TUI-06**: Language toggle: `l` key switches Chinese/English. fluent-i18n based, modular extension points for additional languages
 - [ ] **TUI-07**: Works at 80x24 minimum terminal size; graceful degradation on resize; works in tmux/zellij/Windows Terminal
@@ -117,10 +117,10 @@ Requirements for initial release. All features ship in one milestone, organized 
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| SCAN-01 | Phase 1 | Pending |
-| SCAN-02 | Phase 1 | Pending |
-| SCAN-03 | Phase 1 | Pending |
-| SCAN-04 | Phase 1 | Pending |
+| SCAN-01 | Phase 1 | Complete |
+| SCAN-02 | Phase 1 | Complete |
+| SCAN-03 | Phase 1 | Complete |
+| SCAN-04 | Phase 1 | Complete |
 | SCAN-05 | Phase 3 | Pending |
 | SCAN-06 | Phase 1 | Pending |
 | SCAN-07 | Phase 1 | Pending |
@@ -160,9 +160,9 @@ Requirements for initial release. All features ship in one milestone, organized 
 | CORE-05 | Phase 1 | Pending |
 | CORE-06 | Phase 1 | Pending |
 | TUI-01 | Phase 1 | Pending |
-| TUI-02 | Phase 1 | Pending |
+| TUI-02 | Phase 1 | Complete |
 | TUI-03 | Phase 1 | Pending |
-| TUI-04 | Phase 1 | Pending |
+| TUI-04 | Phase 1 | Complete |
 | TUI-05 | Phase 6 | Pending |
 | TUI-06 | Phase 6 | Pending |
 | TUI-07 | Phase 1 | Pending |

@@ -8,7 +8,7 @@ progress:
   total_phases: 1
   completed_phases: 0
   total_plans: 4
-  completed_plans: 1
+  completed_plans: 2
 ---
 
 # Project State: Portunity
@@ -23,8 +23,8 @@ progress:
 |-------|-------|
 | **Milestone** | 1 |
 | **Current Phase** | 1 — TUI Port Viewer |
-| **Current Plan** | Plan 01-01 complete (walking skeleton). Next: Plan 01-02 (scanner completeness + TUI polish) |
-| **Phase Status** | In Progress (1/4 plans complete) |
+| **Current Plan** | Plan 01-02 complete (dual-stack scanner + TUI polish). Next: Plan 01-03 (filter + search + elevation) |
+| **Phase Status** | In Progress (2/4 plans complete) |
 | **Progress** | `[⬜⬜⬜⬜⬜⬜]` 0/6 phases complete |
 
 ## Accumulated Context
@@ -46,6 +46,16 @@ progress:
 | windows crate v0.62 (not v0.73) | 1 | v0.73 not yet published on crates.io (July 2026). API differences: GetExtendedTcpTable returns u32 error codes, MIB_TCP_STATE is newtype, ntohs is unsafe |
 | New-style Rust module layout | 1 | Per CLAUDE.md rule ("No mod.rs files"). scanner.rs + scanner/tcp.rs (not scanner/mod.rs). Reverted plan's mod.rs references. |
 | Plan 01-01 walking skeleton complete | 1 | Workspace compiles, Windows TCP scan works, TUI renders live port table with state colors. 3 commits: a563e30, 5e0ab4a, 70ef1fe. |
+| Exponential buffer retry (D-01) | 1 | GetExtendedTcpTable/GetExtendedUdpTable: start 16KB, double on ERROR_INSUFFICIENT_BUFFER, max 3 retries, max 128KB |
+| Dual-stack enumeration (D-02) | 1 | AF_INET + AF_INET6 tables merged into unified view; IPv4-mapped IPv6 duplicates dropped, AF_INET kept canonical |
+| Error resilience (D-03) | 1 | Scan failure preserves last successful data; red error bar with "Press r to retry" |
+| Concurrent TCP+UDP scanning (D-04) | 1 | tokio::join! in scan_all() runs TCP and UDP simultaneously; wall-clock = max(TCP, UDP) |
+| Batch process name resolution (D-16) | 1 | ProcessResolver with HashMap<u32, String> cache; batch-resolved via sysinfo after scan |
+| Full connection state color map (SCAN-03) | 1 | 11 TCP states + UDP mapped to semantic color slots per UI-SPEC One Dark palette |
+| Sort cycle interaction (SCAN-04) | 1 | 's' key toggles: none → ascending(▲) → descending(▼) → none on current column |
+| Virtual scrolling (TUI-04) | 1 | Viewport-only Row rendering with right-edge scrollbar (█ thumb, │ track) |
+| Auto-refresh (D-11) | 1 | 5-second background scan; guarded: only when not scanning and no error active |
+| State column text labels | 1 | User feedback: "● LISTEN", "○ T_WAIT", "◉ C_WAIT", "— UDP" — color + text, not color alone |
 
 ### Key TODOs across phases
 
@@ -73,8 +83,8 @@ progress:
 
 ## Session Continuity
 
-- **Last action:** Plan 01-01 executed — walking skeleton complete (3 tasks, 3 commits)
-- **Next action:** Execute Plan 01-02 (scanner completeness: dual-stack, UDP, retry; TUI polish: DataTable, sort, colors, keyboard nav, auto-refresh) — or human-verify the TUI from 01-01 tracer gate
+- **Last action:** Plan 01-02 executed — scanner completeness + TUI polish (2 tasks, 2 commits)
+- **Next action:** Execute Plan 01-03 (filter engine + fuzzy search + admin elevation) — or human-verify the TUI from 01-02
 - **Research flags:** Phase 3 (ETW event schemas), Phase 5 (Tauri system tray + Svelte reactive stores), Phase 6 (windows-wfp API completeness, SQLite FTS5 faceted query syntax)
 
 ---
