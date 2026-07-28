@@ -73,6 +73,9 @@ pub struct App {
 
     /// Whether an elevation request is in-flight (prevents double-elevation).
     pub elevating: bool,
+
+    /// Currently active tab index (0=Overview, 1=Ports, 2=History, 3=Traffic, 4=Firewall).
+    pub active_tab: usize,
 }
 
 impl App {
@@ -100,6 +103,7 @@ impl App {
             is_admin: false,
             admin_check_done: false,
             elevating: false,
+            active_tab: 0,
         }
     }
 

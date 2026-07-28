@@ -23,14 +23,17 @@ use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
 };
 use ratatui::backend::CrosstermBackend;
-use ratatui::layout::{Constraint, Layout, Rect};
+use ratatui::layout::{Alignment, Constraint, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::Paragraph;
 use ratatui::{Frame, Terminal};
 
 use app::App;
-use components::{Component, FilterPanelComponent, PortsComponent, SearchComponent};
+use components::{
+    Component, FilterPanelComponent, FirewallTabComponent, HistoryTabComponent,
+    OverviewComponent, PortsComponent, SearchComponent, TrafficTabComponent,
+};
 use message::Message;
 use theme::Theme;
 use update::update;
@@ -234,6 +237,18 @@ fn map_key_event(key: crossterm::event::KeyEvent, app: &App) -> Option<Message> 
         }
     }
 
+    // --- Tab switching (works in all modes) ---
+    match key.code {
+        KeyCode::Char('1') => return Some(Message::SwitchTab(0)),
+        KeyCode::Char('2') => return Some(Message::SwitchTab(1)),
+        KeyCode::Char('3') => return Some(Message::SwitchTab(2)),
+        KeyCode::Char('4') => return Some(Message::SwitchTab(3)),
+        KeyCode::Char('5') => return Some(Message::SwitchTab(4)),
+        KeyCode::Tab => return Some(Message::SwitchTab((app.active_tab + 1) % 5)),
+        KeyCode::BackTab => return Some(Message::SwitchTab((app.active_tab + 4) % 5)),
+        _ => {}
+    }
+
     // --- Default mode dispatch (when no overlay is active) ---
     match key.code {
         KeyCode::Char('q') => Some(Message::Quit),
@@ -277,8 +292,42 @@ fn map_key_event(key: crossterm::event::KeyEvent, app: &App) -> Option<Message> 
 }
 
 /// Render the full application frame.
+///
+/// Enforces the resize gate (TUI-07): if terminal < 80x24, renders a centered
+/// "Terminal too small" message and returns without rendering the normal layout.
+/// Otherwise renders the full 4-region layout: tab bar, content, status bar, footer.
 fn render_app(f: &mut Frame, app: &App, theme: &Theme) {
     let area = f.area();
+
+    // Resize gate (TUI-07): enforce minimum 80x24 terminal size
+    if area.width < 80 || area.height < 24 {
+        let text = Text::from(vec![
+            Line::from(Span::styled(
+                "Terminal too small",
+                Style::default()
+                    .fg(theme.fg_muted)
+                    .bg(theme.bg_base)
+                    .add_modifier(Modifier::BOLD),
+            )),
+            Line::from(""),
+            Line::from(Span::styled(
+                format!(
+                    "Minimum size: 80 columns x 24 rows. Current: {}x{}",
+                    area.width, area.height
+                ),
+                Style::default().fg(theme.fg_muted).bg(theme.bg_base),
+            )),
+            Line::from(Span::styled(
+                "Resize your terminal window to continue.",
+                Style::default().fg(theme.fg_muted).bg(theme.bg_base),
+            )),
+        ]);
+        let paragraph = Paragraph::new(text)
+            .alignment(Alignment::Center)
+            .style(Style::default().bg(theme.bg_base));
+        f.render_widget(paragraph, area);
+        return;
+    }
 
     // Layout: tab_bar (1), content (fill), status_bar (1), footer (1)
     let layout = Layout::vertical([
@@ -294,47 +343,60 @@ fn render_app(f: &mut Frame, app: &App, theme: &Theme) {
     let status_bar_area = layout[2];
     let footer_area = layout[3];
 
-    // Tab bar
-    render_tab_bar(f, tab_bar_area, theme);
+    // Tab bar with active tab highlighting
+    render_tab_bar(f, tab_bar_area, app, theme);
 
-    // Adjust content area for overlays: search (3 rows), filter (5 rows) stack at top
-    let overlay_offset = if app.search_active { 3u16 } else { 0u16 }
-        + if app.filter_active { 5u16 } else { 0u16 };
+    // Content area dispatch: render active tab component
+    // Search and filter overlays only apply on Ports tab (tab 1)
+    if app.active_tab == 1 {
+        // Adjust content area for overlays: search (3 rows), filter (5 rows) stack at top
+        let overlay_offset = if app.search_active { 3u16 } else { 0u16 }
+            + if app.filter_active { 5u16 } else { 0u16 };
 
-    let table_area = if overlay_offset > 0 && content_area.height > overlay_offset {
-        Rect {
-            y: content_area.y + overlay_offset,
-            height: content_area.height.saturating_sub(overlay_offset),
-            ..content_area
+        let table_area = if overlay_offset > 0 && content_area.height > overlay_offset {
+            Rect {
+                y: content_area.y + overlay_offset,
+                height: content_area.height.saturating_sub(overlay_offset),
+                ..content_area
+            }
+        } else {
+            content_area
+        };
+
+        // Port table (below overlays)
+        PortsComponent.render(app, f, table_area, theme);
+
+        // Overlays: search bar on top, filter panel below it
+        if app.search_active {
+            let search_overlay = Rect {
+                height: 3,
+                ..content_area
+            };
+            SearchComponent.render(app, f, search_overlay, theme);
+        }
+
+        if app.filter_active {
+            let filter_y = if app.search_active {
+                content_area.y + 3
+            } else {
+                content_area.y
+            };
+            let filter_overlay = Rect {
+                y: filter_y,
+                height: 5,
+                ..content_area
+            };
+            FilterPanelComponent.render(app, f, filter_overlay, theme);
         }
     } else {
-        content_area
-    };
-
-    // Content: Ports component (below overlays)
-    PortsComponent.render(app, f, table_area, theme);
-
-    // Overlays: search bar on top, filter panel below it
-    if app.search_active {
-        let search_overlay = Rect {
-            height: 3,
-            ..content_area
-        };
-        SearchComponent.render(app, f, search_overlay, theme);
-    }
-
-    if app.filter_active {
-        let filter_y = if app.search_active {
-            content_area.y + 3
-        } else {
-            content_area.y
-        };
-        let filter_overlay = Rect {
-            y: filter_y,
-            height: 5,
-            ..content_area
-        };
-        FilterPanelComponent.render(app, f, filter_overlay, theme);
+        // Other tabs get full content area
+        match app.active_tab {
+            0 => OverviewComponent.render(app, f, content_area, theme),
+            2 => HistoryTabComponent.render(app, f, content_area, theme),
+            3 => TrafficTabComponent.render(app, f, content_area, theme),
+            4 => FirewallTabComponent.render(app, f, content_area, theme),
+            _ => {} // unreachable — guarded by update bounds check
+        }
     }
 
     // Status bar
@@ -344,16 +406,48 @@ fn render_app(f: &mut Frame, app: &App, theme: &Theme) {
     render_footer(f, footer_area, app, theme);
 }
 
-/// Render the tab bar — static for tracer (no active tab state yet).
-fn render_tab_bar(f: &mut Frame, area: Rect, theme: &Theme) {
-    let tabs = Paragraph::new(Text::from(
-        " [1] Overview  [2] Ports  [3] History  [4] Traffic  [5] Firewall",
-    ))
-    .style(
-        Style::default()
-            .fg(theme.fg_muted)
-            .bg(theme.bg_surface),
-    );
+/// Render the tab bar with active tab highlighted (Bold + accent_primary bg).
+///
+/// Active tab: Bold + fg in bg_base + bg in accent_primary (reverse contrast).
+/// Inactive tabs: Dim + fg_muted + bg_surface.
+fn render_tab_bar(f: &mut Frame, area: Rect, app: &App, theme: &Theme) {
+    let tab_labels = [
+        " [1] Overview ",
+        " [2] Ports ",
+        " [3] History ",
+        " [4] Traffic ",
+        " [5] Firewall ",
+    ];
+
+    let active_style = Style::default()
+        .fg(theme.bg_base)
+        .bg(theme.accent_primary)
+        .add_modifier(Modifier::BOLD);
+
+    let inactive_style = Style::default()
+        .fg(theme.fg_muted)
+        .bg(theme.bg_surface)
+        .add_modifier(Modifier::DIM);
+
+    let sep_style = Style::default()
+        .fg(theme.fg_muted)
+        .bg(theme.bg_surface);
+
+    let mut spans: Vec<Span> = Vec::new();
+
+    for (i, label) in tab_labels.iter().enumerate() {
+        if i > 0 {
+            spans.push(Span::styled(" ", sep_style));
+        }
+        if i == app.active_tab {
+            spans.push(Span::styled(*label, active_style));
+        } else {
+            spans.push(Span::styled(*label, inactive_style));
+        }
+    }
+
+    let tabs = Paragraph::new(Text::from(Line::from(spans)))
+        .style(Style::default().bg(theme.bg_surface));
     f.render_widget(tabs, area);
 }
 

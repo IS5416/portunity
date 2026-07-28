@@ -155,4 +155,7 @@ pub enum Message {
 
     /// UAC prompt was declined; continue in non-admin mode.
     ElevateDeclined,
+
+    /// Switch to a tab by index (0=Overview, 1=Ports, 2=History, 3=Traffic, 4=Firewall).
+    SwitchTab(usize),
 }

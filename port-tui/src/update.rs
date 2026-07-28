@@ -241,6 +241,12 @@ pub fn update(app: &mut App, msg: Message) {
             // UAC was declined — app continues in non-admin mode (D-07)
             app.elevating = false;
         }
+
+        Message::SwitchTab(index) => {
+            if index < 5 {
+                app.active_tab = index;
+            }
+        }
     }
 }
 

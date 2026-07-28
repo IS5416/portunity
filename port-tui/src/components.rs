@@ -9,10 +9,18 @@ use ratatui::Frame;
 pub mod ports;
 pub mod search;
 pub mod filter_panel;
+pub mod overview;
+pub mod history;
+pub mod traffic;
+pub mod firewall;
 
 pub use ports::PortsComponent;
 pub use search::SearchComponent;
 pub use filter_panel::FilterPanelComponent;
+pub use overview::OverviewComponent;
+pub use history::HistoryTabComponent;
+pub use traffic::TrafficTabComponent;
+pub use firewall::FirewallTabComponent;
 
 /// Trait for renderable TUI components.
 ///
