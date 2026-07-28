@@ -15,4 +15,5 @@ anyhow.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 chrono.workspace = true
+windows.workspace = true
 eddacraft-tui = "0.4"

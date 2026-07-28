@@ -62,6 +62,17 @@ pub struct App {
 
     /// Currently focused field in the filter panel (tab cycles).
     pub filter_focused_field: FilterField,
+
+    // --- Admin state ---
+
+    /// Whether the current process has administrator privileges.
+    pub is_admin: bool,
+
+    /// Whether the startup admin check has completed (gates status bar display).
+    pub admin_check_done: bool,
+
+    /// Whether an elevation request is in-flight (prevents double-elevation).
+    pub elevating: bool,
 }
 
 impl App {
@@ -86,6 +97,9 @@ impl App {
             active_filter: Filter::default(),
             filter_active: false,
             filter_focused_field: FilterField::PortMin,
+            is_admin: false,
+            admin_check_done: false,
+            elevating: false,
         }
     }
 

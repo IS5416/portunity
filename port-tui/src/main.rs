@@ -8,6 +8,7 @@
 
 mod app;
 mod components;
+mod elevate;
 mod message;
 mod theme;
 mod update;
@@ -58,6 +59,10 @@ async fn main() -> Result<()> {
 
     let mut app = App::new();
     let theme = theme::default_theme();
+
+    // Admin check at startup (D-09: run once, result persists for session)
+    let is_admin = elevate::is_admin();
+    let _ = tx.send(Message::AdminCheck(is_admin));
 
     // Spawn initial scan (D-15: first frame shows scanning indicator)
     spawn_scan(tx.clone());
@@ -119,7 +124,29 @@ fn run_event_loop(
             if let Event::Key(key) = event::read()? {
                 let msg = map_key_event(key, app);
                 if let Some(m) = msg {
-                    update(app, m);
+                    // Intercept ElevateRequest: spawn blocking elevation task
+                    if matches!(m, Message::ElevateRequest) {
+                        if !app.elevating {
+                            app.elevating = true;
+                            let tx_elevate = tx.clone();
+                            tokio::task::spawn_blocking(move || {
+                                match elevate::elevate_to_admin() {
+                                    Ok(()) => {
+                                        // User declined UAC — continue in non-admin mode
+                                        let _ = tx_elevate.send(Message::ElevateDeclined);
+                                    }
+                                    Err(e) => {
+                                        // Elevation failed with an unexpected error
+                                        let _ = tx_elevate.send(Message::ScanError(
+                                            format!("Elevation failed: {}", e),
+                                        ));
+                                    }
+                                }
+                            });
+                        }
+                    } else {
+                        update(app, m);
+                    }
                 }
             }
         }
@@ -230,6 +257,14 @@ fn map_key_event(key: crossterm::event::KeyEvent, app: &App) -> Option<Message> 
                 None
             }
         }
+        KeyCode::Char('a') => {
+            // Elevation: only when not already admin, not in overlay, and check done
+            if !app.is_admin && app.admin_check_done && !app.search_active && !app.filter_active {
+                Some(Message::ElevateRequest)
+            } else {
+                None
+            }
+        }
         KeyCode::Esc => {
             if app.error.is_some() {
                 None
@@ -323,60 +358,106 @@ fn render_tab_bar(f: &mut Frame, area: Rect, theme: &Theme) {
 }
 
 /// Render the status bar with context-sensitive message.
+///
+/// Includes admin status indicator per UI-SPEC: "Admin \u{2713}" in green for admin,
+/// "Admin needed \u{2014} press a to elevate" in yellow for non-admin.
 fn render_status_bar(f: &mut Frame, area: Rect, app: &App, theme: &Theme) {
-    let (status, style) = if app.scanning {
-        (
-            format!(
-                "Scanning... \u{00b7} {} found so far \u{00b7} {}",
-                app.ports.len(),
-                chrono::Local::now().format("%H:%M:%S")
-            ),
-            Style::default()
-                .fg(theme.fg_default)
-                .bg(theme.bg_surface),
-        )
-    } else if let Some(ref e) = app.error {
-        (
-            format!("\u{26a0} {} \u{00b7} Press r to retry", e),
-            Style::default()
-                .fg(theme.status_error)
-                .bg(theme.bg_surface),
-        )
-    } else if app.search_active {
-        // Search takes precedence in status bar
-        (
-            format!(
-                "Search: \"{}\" \u{00b7} {} results",
-                app.search_query,
-                app.filtered_ports.len()
-            ),
-            Style::default()
-                .fg(theme.accent_primary)
-                .bg(theme.bg_surface),
-        )
-    } else if app.filter_active {
-        (
-            format!(
-                "Filtered: {} of {} ports \u{00b7} combined filter active",
-                app.filtered_ports.len(),
-                app.ports.len()
-            ),
-            Style::default()
-                .fg(theme.status_warning)
-                .bg(theme.bg_surface),
-        )
+    // Build admin status suffix
+    let admin_suffix = if app.admin_check_done {
+        if app.is_admin {
+            Span::styled(
+                " \u{00b7} Admin \u{2713}",
+                Style::default().fg(theme.status_success),
+            )
+        } else {
+            Span::styled(
+                " \u{00b7} Admin needed \u{2014} press a to elevate",
+                Style::default().fg(theme.status_warning),
+            )
+        }
     } else {
-        let now = chrono::Local::now().format("%H:%M:%S");
-        (
-            format!("Live \u{00b7} {} ports \u{00b7} {}", app.ports.len(), now),
-            Style::default()
-                .fg(theme.fg_default)
-                .bg(theme.bg_surface),
-        )
+        // Admin check not done yet — don't show admin status to prevent flicker
+        Span::raw("")
     };
 
-    let paragraph = Paragraph::new(Text::from(status)).style(style);
-    f.render_widget(paragraph, area);
+    let base_style = Style::default().bg(theme.bg_surface);
+
+    if app.scanning {
+        let spans = vec![
+            Span::styled("Scanning...", base_style.fg(theme.fg_default)),
+            Span::styled(
+                format!(" \u{00b7} {} found so far", app.ports.len()),
+                base_style.fg(theme.fg_muted),
+            ),
+            Span::styled(
+                format!(" \u{00b7} {}", chrono::Local::now().format("%H:%M:%S")),
+                base_style.fg(theme.fg_muted),
+            ),
+            admin_suffix,
+        ];
+        let paragraph = Paragraph::new(Text::from(Line::from(spans))).style(base_style);
+        f.render_widget(paragraph, area);
+    } else if let Some(ref e) = app.error {
+        let spans = vec![
+            Span::styled(
+                format!("\u{26a0} {}", e),
+                Style::default().fg(theme.status_error).bg(theme.bg_surface),
+            ),
+            Span::styled(
+                " \u{00b7} Press r to retry",
+                Style::default().fg(theme.fg_muted).bg(theme.bg_surface),
+            ),
+        ];
+        let paragraph = Paragraph::new(Text::from(Line::from(spans)))
+            .style(Style::default().bg(theme.bg_surface));
+        f.render_widget(paragraph, area);
+    } else if app.search_active {
+        let spans = vec![
+            Span::styled(
+                format!("Search: \"{}\"", app.search_query),
+                base_style.fg(theme.accent_primary),
+            ),
+            Span::styled(
+                format!(" \u{00b7} {} results", app.filtered_ports.len()),
+                base_style.fg(theme.fg_muted),
+            ),
+        ];
+        let paragraph = Paragraph::new(Text::from(Line::from(spans))).style(base_style);
+        f.render_widget(paragraph, area);
+    } else if app.filter_active {
+        let spans = vec![
+            Span::styled(
+                format!(
+                    "Filtered: {} of {} ports",
+                    app.filtered_ports.len(),
+                    app.ports.len()
+                ),
+                base_style.fg(theme.status_warning),
+            ),
+            Span::styled(
+                " \u{00b7} combined filter active",
+                base_style.fg(theme.fg_muted),
+            ),
+        ];
+        let paragraph = Paragraph::new(Text::from(Line::from(spans))).style(base_style);
+        f.render_widget(paragraph, area);
+    } else {
+        let now = chrono::Local::now().format("%H:%M:%S");
+        let spans = vec![
+            Span::styled("Live", base_style.fg(theme.fg_emphasis)),
+            Span::styled(
+                format!(" \u{00b7} {} ports", app.ports.len()),
+                base_style.fg(theme.fg_default),
+            ),
+            Span::styled(
+                format!(" \u{00b7} {}", now),
+                base_style.fg(theme.fg_muted),
+            ),
+            admin_suffix,
+        ];
+        let paragraph = Paragraph::new(Text::from(Line::from(spans))).style(base_style);
+        f.render_widget(paragraph, area);
+    }
 }
 
 /// Render the footer with context-sensitive keyboard shortcuts per UI-SPEC.
@@ -420,7 +501,7 @@ fn render_footer(f: &mut Frame, area: Rect, app: &App, theme: &Theme) {
         f.render_widget(footer, area);
     } else {
         // Default footer
-        let line = Line::from(vec![
+        let mut spans: Vec<Span> = vec![
             Span::styled("[\u{2191}\u{2193}jk]", accent),
             Span::styled("Navigate", muted),
             Span::styled("  ", muted),
@@ -435,14 +516,22 @@ fn render_footer(f: &mut Frame, area: Rect, app: &App, theme: &Theme) {
             Span::styled("  ", muted),
             Span::styled("[r]", accent),
             Span::styled("Refresh", muted),
-            Span::styled("  ", muted),
-            Span::styled("[q]", accent),
-            Span::styled("Quit", muted),
-            Span::styled("  ", muted),
-            Span::styled("[?]", accent),
-            Span::styled("Help", muted),
-        ]);
-        let footer = Paragraph::new(Text::from(line))
+        ];
+
+        // Add elevation hint when not admin (after admin check completes)
+        if !app.is_admin && app.admin_check_done {
+            spans.push(Span::styled("  ", muted));
+            spans.push(Span::styled("[a]", accent));
+            spans.push(Span::styled("Elevate", muted));
+        }
+
+        spans.push(Span::styled("  ", muted));
+        spans.push(Span::styled("[q]", accent));
+        spans.push(Span::styled("Quit", muted));
+        spans.push(Span::styled("  ", muted));
+        spans.push(Span::styled("[?]", accent));
+        spans.push(Span::styled("Help", muted));
+        let footer = Paragraph::new(Text::from(Line::from(spans)))
             .style(Style::default().bg(theme.bg_surface))
             .centered();
         f.render_widget(footer, area);

@@ -225,6 +225,22 @@ pub fn update(app: &mut App, msg: Message) {
                 app.selected_index = len.saturating_sub(1);
             }
         }
+
+        // --- Admin / elevation handlers ---
+
+        Message::AdminCheck(is_admin) => {
+            app.is_admin = is_admin;
+            app.admin_check_done = true;
+        }
+        Message::ElevateRequest => {
+            // Handled by the main event loop (triggers spawn_blocking).
+            // The update function just records the intent.
+            // The main loop sets app.elevating to prevent double-elevation.
+        }
+        Message::ElevateDeclined => {
+            // UAC was declined — app continues in non-admin mode (D-07)
+            app.elevating = false;
+        }
     }
 }
 

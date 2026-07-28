@@ -144,4 +144,15 @@ pub enum Message {
 
     /// Cycle to the next field in the filter panel.
     FilterTabField,
+
+    // --- Admin / elevation messages ---
+
+    /// Result of the startup admin check.
+    AdminCheck(bool),
+
+    /// User pressed 'a' to request admin elevation.
+    ElevateRequest,
+
+    /// UAC prompt was declined; continue in non-admin mode.
+    ElevateDeclined,
 }
