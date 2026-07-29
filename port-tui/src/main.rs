@@ -220,8 +220,8 @@ fn map_key_event(key: crossterm::event::KeyEvent, app: &App) -> Option<Message> 
             KeyCode::Enter => return Some(Message::FilterApply),
             KeyCode::Tab => return Some(Message::FilterTabField),
             KeyCode::BackTab => {
-                // Shift+Tab: cycle backward (send FilterTabField; we reverse by sending 5 forw cycles)
-                return Some(Message::FilterTabField);
+                // Shift+Tab: cycle backward
+                return Some(Message::FilterTabBackward);
             }
             KeyCode::Char(ch) => {
                 if !ch.is_control() {
@@ -231,12 +231,7 @@ fn map_key_event(key: crossterm::event::KeyEvent, app: &App) -> Option<Message> 
                     ));
                 }
             }
-            KeyCode::Backspace => {
-                return Some(Message::FilterUpdateField(
-                    app.filter_focused_field.clone(),
-                    String::new(),
-                ));
-            }
+            KeyCode::Backspace => return Some(Message::FilterFieldBackspace),
             // Pass-through: j, k, r, s continue to work
             _ => {}
         }
@@ -286,7 +281,9 @@ fn map_key_event(key: crossterm::event::KeyEvent, app: &App) -> Option<Message> 
             }
         }
         KeyCode::Esc => {
-            if app.error.is_some() {
+            if app.filter_applied {
+                Some(Message::FilterDeactivate)
+            } else if app.error.is_some() {
                 None
             } else {
                 Some(Message::Quit)
@@ -356,7 +353,7 @@ fn render_app(f: &mut Frame, app: &App, theme: &Theme) {
     if app.active_tab == 1 {
         // Adjust content area for overlays: search (3 rows), filter (5 rows) stack at top
         let overlay_offset = if app.search_active { 3u16 } else { 0u16 }
-            + if app.filter_active { 5u16 } else { 0u16 };
+            + if app.filter_active { 7u16 } else { 0u16 };
 
         let table_area = if overlay_offset > 0 && content_area.height > overlay_offset {
             Rect {
@@ -388,7 +385,7 @@ fn render_app(f: &mut Frame, app: &App, theme: &Theme) {
             };
             let filter_overlay = Rect {
                 y: filter_y,
-                height: 5,
+                height: 7,
                 ..content_area
             };
             FilterPanelComponent.render(app, f, filter_overlay, theme);
@@ -523,7 +520,7 @@ fn render_status_bar(f: &mut Frame, area: Rect, app: &App, theme: &Theme) {
         ];
         let paragraph = Paragraph::new(Text::from(Line::from(spans))).style(base_style);
         f.render_widget(paragraph, area);
-    } else if app.filter_active {
+    } else if app.filter_active || app.filter_applied {
         let spans = vec![
             Span::styled(
                 format!(
@@ -593,6 +590,24 @@ fn render_footer(f: &mut Frame, area: Rect, app: &App, theme: &Theme) {
             Span::styled("[Enter]", accent),
             Span::styled("Apply", muted),
             Span::styled("  \u{2014}  filter by port/PID/process/state/protocol", muted),
+        ]);
+        let footer = Paragraph::new(Text::from(line))
+            .style(Style::default().bg(theme.bg_surface))
+            .centered();
+        f.render_widget(footer, area);
+    } else if app.filter_applied {
+        // Filter latched (Enter applied, panel closed)
+        let line = Line::from(vec![
+            Span::styled("[Esc]", accent),
+            Span::styled("Clear filter", muted),
+            Span::styled("  ", muted),
+            Span::styled("[f]", accent),
+            Span::styled("Edit filter", muted),
+            Span::styled(format!(
+                "  \u{2014}  {} of {} ports matched",
+                app.filtered_ports.len(),
+                app.ports.len()
+            ), muted),
         ]);
         let footer = Paragraph::new(Text::from(line))
             .style(Style::default().bg(theme.bg_surface))

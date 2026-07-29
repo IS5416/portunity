@@ -54,7 +54,7 @@ pub fn update(app: &mut App, msg: Message) {
         }
         Message::Sort(col) => {
             if app.sort_column == col {
-                // Same column: cycle sort order
+                // Same column: toggle sort direction (Asc ↔ Desc)
                 app.sort_order = app.sort_order.cycle();
             } else {
                 // Different column: start ascending
@@ -151,11 +151,16 @@ pub fn update(app: &mut App, msg: Message) {
 
         Message::FilterActivate => {
             app.filter_active = true;
+            app.filter_applied = false;
             app.active_filter = Filter::default();
+            app.filter_field_text.clear();
+            app.filtered_ports = app.ports.clone();
         }
         Message::FilterDeactivate => {
             app.filter_active = false;
+            app.filter_applied = false;
             app.active_filter = Filter::default();
+            app.filter_field_text.clear();
             // If search is also active, apply search instead
             if app.search_active && !app.search_query.is_empty() {
                 app.filtered_ports = filter::fuzzy_search(&app.ports, &app.search_query);
@@ -164,65 +169,30 @@ pub fn update(app: &mut App, msg: Message) {
             }
         }
         Message::FilterUpdateField(field, value) => {
-            match field {
-                FilterField::PortMin => {
-                    if let Ok(n) = value.parse::<u16>() {
-                        let (_, max) = app.active_filter.port_range.unwrap_or((0, 65535));
-                        app.active_filter.port_range = Some((n, max));
-                    }
-                    // On parse failure: ignore (plan: user can retry)
-                }
-                FilterField::PortMax => {
-                    if let Ok(n) = value.parse::<u16>() {
-                        let (min, _) = app.active_filter.port_range.unwrap_or((0, 65535));
-                        app.active_filter.port_range = Some((min, n));
-                    }
-                }
-                FilterField::ProcessName => {
-                    if value.trim().is_empty() {
-                        app.active_filter.process_names.clear();
-                    } else {
-                        app.active_filter.process_names = vec![value];
-                    }
-                }
-                FilterField::Pid => {
-                    if value.trim().is_empty() {
-                        app.active_filter.pids.clear();
-                    } else if let Ok(n) = value.parse::<u32>() {
-                        app.active_filter.pids = vec![n];
-                    }
-                }
-                FilterField::Protocol => {
-                    app.active_filter.protocols = match value.to_lowercase().trim() {
-                        "tcp" => vec![port_core::models::Protocol::Tcp, port_core::models::Protocol::Tcp6],
-                        "udp" => vec![port_core::models::Protocol::Udp, port_core::models::Protocol::Udp6],
-                        "tcp4" => vec![port_core::models::Protocol::Tcp],
-                        "tcp6" => vec![port_core::models::Protocol::Tcp6],
-                        "udp4" => vec![port_core::models::Protocol::Udp],
-                        "udp6" => vec![port_core::models::Protocol::Udp6],
-                        "" => vec![],
-                        _ => vec![], // unknown: clear
-                    };
-                }
-                FilterField::State => {
-                    app.active_filter.states = match value.to_lowercase().trim() {
-                        "listen" | "listening" => vec![port_core::models::PortState::Listen],
-                        "established" | "estab" => vec![port_core::models::PortState::Established],
-                        "time_wait" | "timewait" | "t_wait" => vec![port_core::models::PortState::TimeWait],
-                        "close_wait" | "closewait" | "c_wait" => vec![port_core::models::PortState::CloseWait],
-                        "syn_sent" | "synsent" => vec![port_core::models::PortState::SynSent],
-                        "" => vec![],
-                        _ => vec![], // unknown: clear
-                    };
-                }
-            }
+            // Accumulate character into raw text buffer (no parsing)
+            let buf = app.filter_field_text.entry(field.clone()).or_default();
+            buf.push_str(&value);
+        }
+        Message::FilterFieldBackspace => {
+            let buf = app.filter_field_text.entry(app.filter_focused_field.clone()).or_default();
+            buf.pop();
         }
         Message::FilterTabField => {
+            // Parse current field buffer into active_filter before advancing
+            parse_filter_buffer(app);
             app.filter_focused_field = app.filter_focused_field.next();
         }
+        Message::FilterTabBackward => {
+            // Parse current field buffer into active_filter before reversing
+            parse_filter_buffer(app);
+            app.filter_focused_field = app.filter_focused_field.prev();
+        }
         Message::FilterApply => {
+            // Parse current field buffer, then apply all filters
+            parse_filter_buffer(app);
             app.filtered_ports = filter::apply_filters(&app.ports, &app.active_filter);
-            // Clamp selection
+            app.filter_active = false;
+            app.filter_applied = true;
             let len = display_len(app);
             if len > 0 && app.selected_index >= len {
                 app.selected_index = len.saturating_sub(1);
@@ -255,7 +225,7 @@ pub fn update(app: &mut App, msg: Message) {
 
 /// Return the length of the currently visible data.
 fn display_len(app: &App) -> usize {
-    if app.search_active || app.filter_active {
+    if app.search_active || app.filter_active || app.filter_applied {
         app.filtered_ports.len()
     } else {
         app.ports.len()
@@ -276,14 +246,82 @@ fn recalc_search(app: &mut App) {
     }
 }
 
+/// Parse the current focused field's text buffer into active_filter.
+fn parse_filter_buffer(app: &mut App) {
+    let field = app.filter_focused_field.clone();
+    let value = app
+        .filter_field_text
+        .get(&field)
+        .cloned()
+        .unwrap_or_default();
+    if value.is_empty() {
+        return;
+    }
+
+    match field {
+        FilterField::PortMin => {
+            if let Ok(n) = value.parse::<u16>() {
+                let (_, max) = app.active_filter.port_range.unwrap_or((0, 65535));
+                app.active_filter.port_range = Some((n, max));
+            }
+        }
+        FilterField::PortMax => {
+            if let Ok(n) = value.parse::<u16>() {
+                let (min, _) = app.active_filter.port_range.unwrap_or((0, 65535));
+                app.active_filter.port_range = Some((min, n));
+            }
+        }
+        FilterField::ProcessName => {
+            app.active_filter.process_names = vec![value];
+        }
+        FilterField::Pid => {
+            if let Ok(n) = value.parse::<u32>() {
+                app.active_filter.pids = vec![n];
+            }
+        }
+        FilterField::Protocol => {
+            app.active_filter.protocols = match value.to_lowercase().trim() {
+                "tcp" => vec![
+                    port_core::models::Protocol::Tcp,
+                    port_core::models::Protocol::Tcp6,
+                ],
+                "udp" => vec![
+                    port_core::models::Protocol::Udp,
+                    port_core::models::Protocol::Udp6,
+                ],
+                "tcp4" => vec![port_core::models::Protocol::Tcp],
+                "tcp6" => vec![port_core::models::Protocol::Tcp6],
+                "udp4" => vec![port_core::models::Protocol::Udp],
+                "udp6" => vec![port_core::models::Protocol::Udp6],
+                "" => vec![],
+                _ => vec![], // unknown: clear
+            };
+        }
+        FilterField::State => {
+            app.active_filter.states = match value.to_lowercase().trim() {
+                "listen" | "listening" => vec![port_core::models::PortState::Listen],
+                "established" | "estab" => {
+                    vec![port_core::models::PortState::Established]
+                }
+                "time_wait" | "timewait" | "t_wait" => {
+                    vec![port_core::models::PortState::TimeWait]
+                }
+                "close_wait" | "closewait" | "c_wait" => {
+                    vec![port_core::models::PortState::CloseWait]
+                }
+                "syn_sent" | "synsent" => vec![port_core::models::PortState::SynSent],
+                "" => vec![],
+                _ => vec![], // unknown: clear
+            };
+        }
+    }
+}
+
 /// Sort the port list in-place according to current sort_column and sort_order.
 ///
 /// When search or filter is active, sort operates on filtered_ports.
-/// SortOrder::None preserves current order.
+/// Always applies sort — Ascending or Descending.
 fn sort_ports(app: &mut App) {
-    if matches!(app.sort_order, SortOrder::None) {
-        return;
-    }
 
     let col = app.sort_column;
     let ascending = matches!(app.sort_order, SortOrder::Ascending);

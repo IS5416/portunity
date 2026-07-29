@@ -318,7 +318,6 @@ fn header_cell<'a>(label: &str, col: SortColumn, app: &App, theme: &Theme) -> Ce
         match app.sort_order {
             SortOrder::Ascending => format!("{} \u{25b2}", label),   // ▲
             SortOrder::Descending => format!("{} \u{25bc}", label),  // ▼
-            SortOrder::None => label.to_string(),
         }
     } else {
         label.to_string()

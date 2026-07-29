@@ -32,24 +32,22 @@ impl SortColumn {
 /// Sort direction for the currently sorted column.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SortOrder {
-    None,
     Ascending,
     Descending,
 }
 
 impl SortOrder {
-    /// Cycle through sort orders: None → Ascending → Descending → None.
+    /// Toggle sort direction: Ascending ↔ Descending.
     pub fn cycle(self) -> Self {
         match self {
-            Self::None => Self::Ascending,
             Self::Ascending => Self::Descending,
-            Self::Descending => Self::None,
+            Self::Descending => Self::Ascending,
         }
     }
 }
 
 /// Fields in the filter panel that can be edited.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum FilterField {
     PortMin,
     PortMax,
@@ -69,6 +67,18 @@ impl FilterField {
             Self::Pid => Self::Protocol,
             Self::Protocol => Self::State,
             Self::State => Self::PortMin,
+        }
+    }
+
+    /// Return the previous field in the tab cycle.
+    pub fn prev(&self) -> Self {
+        match self {
+            Self::PortMin => Self::State,
+            Self::PortMax => Self::PortMin,
+            Self::ProcessName => Self::PortMax,
+            Self::Pid => Self::ProcessName,
+            Self::Protocol => Self::Pid,
+            Self::State => Self::Protocol,
         }
     }
 }
@@ -142,8 +152,14 @@ pub enum Message {
     /// Apply the current filter criteria.
     FilterApply,
 
-    /// Cycle to the next field in the filter panel.
+    /// Remove last character from focused filter field buffer.
+    FilterFieldBackspace,
+
+    /// Cycle to the next field in the filter panel (parses current buffer first).
     FilterTabField,
+
+    /// Cycle to the previous field in the filter panel (Shift+Tab).
+    FilterTabBackward,
 
     // --- Admin / elevation messages ---
 

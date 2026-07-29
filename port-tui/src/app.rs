@@ -3,6 +3,7 @@
 //! The `App` struct holds all mutable state. It is mutated by `update()`
 //! and read by component `render()` methods.
 
+use std::collections::HashMap;
 use std::time::Instant;
 
 use port_core::models::{Connection, Filter};
@@ -60,8 +61,16 @@ pub struct App {
     /// Whether the filter panel overlay is active.
     pub filter_active: bool,
 
+    /// Whether a filter has been applied (via Enter). Keeps display_data()
+    /// showing filtered_ports even after the panel is dismissed.
+    pub filter_applied: bool,
+
     /// Currently focused field in the filter panel (tab cycles).
     pub filter_focused_field: FilterField,
+
+    /// Raw text buffers for filter field input (character-by-character accumulation).
+    /// Parsed into active_filter on Tab or Enter.
+    pub filter_field_text: HashMap<FilterField, String>,
 
     // --- Admin state ---
 
@@ -91,7 +100,7 @@ impl App {
             last_scan_time: None,
             should_quit: false,
             sort_column: SortColumn::Port,
-            sort_order: SortOrder::None,
+            sort_order: SortOrder::Ascending,
             selected_index: 0,
             last_auto_refresh: None,
             search_query: String::new(),
@@ -99,7 +108,9 @@ impl App {
             search_cursor_pos: 0,
             active_filter: Filter::default(),
             filter_active: false,
+            filter_applied: false,
             filter_focused_field: FilterField::PortMin,
+            filter_field_text: HashMap::new(),
             is_admin: false,
             admin_check_done: false,
             elevating: false,
@@ -112,7 +123,7 @@ impl App {
     /// When search or filter is active, returns filtered_ports.
     /// Otherwise returns the full port list.
     pub fn display_data(&self) -> &[Connection] {
-        if self.search_active || self.filter_active {
+        if self.search_active || self.filter_active || self.filter_applied {
             &self.filtered_ports
         } else {
             &self.ports
