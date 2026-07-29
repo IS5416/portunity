@@ -106,6 +106,9 @@ fn spawn_scan(tx: tokio::sync::mpsc::UnboundedSender<Message>) {
 }
 
 /// Run the TEA event loop with auto-refresh and keyboard navigation.
+///
+/// Renders on-demand: only redraws when state changes or the per-second
+/// clock refresh fires. This eliminates the constant 5 fps idle redraw.
 fn run_event_loop(
     terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
     app: &mut App,
@@ -114,16 +117,35 @@ fn run_event_loop(
     rx: &mut tokio::sync::mpsc::UnboundedReceiver<Message>,
     scan_spawned: &mut bool,
 ) -> Result<()> {
+    // Minimum interval between forced renders (clock update, 1 Hz).
+    const CLOCK_TICK: Duration = Duration::from_secs(1);
+
     loop {
-        // Render current state
-        terminal.draw(|f| render_app(f, app, theme))?;
+        // Render only when needed, but at least once per second for clock
+        let now = std::time::Instant::now();
+        let clock_due = app
+            .last_render
+            .map_or(true, |last| now.duration_since(last) >= CLOCK_TICK);
+
+        if app.needs_render || clock_due {
+            terminal.draw(|f| render_app(f, app, theme))?;
+            app.needs_render = false;
+            app.last_render = Some(now);
+        }
 
         if app.should_quit {
             break;
         }
 
-        // Poll for keyboard events with timeout (D-10)
-        if event::poll(Duration::from_millis(200))? {
+        // Poll timeout: short when scanning (need to catch completion),
+        // longer when idle (no work to do).
+        let poll_dur = if app.scanning {
+            Duration::from_millis(100)
+        } else {
+            Duration::from_millis(500)
+        };
+
+        if event::poll(poll_dur)? {
             if let Event::Key(key) = event::read()? {
                 // Only process key press events — skip Release/Repeat
                 // to prevent double-firing of all keyboard actions.
@@ -140,11 +162,9 @@ fn run_event_loop(
                             tokio::task::spawn_blocking(move || {
                                 match elevate::elevate_to_admin() {
                                     Ok(()) => {
-                                        // User declined UAC — continue in non-admin mode
                                         let _ = tx_elevate.send(Message::ElevateDeclined);
                                     }
                                     Err(e) => {
-                                        // Elevation failed with an unexpected error
                                         let _ = tx_elevate.send(Message::ScanError(
                                             format!("Elevation failed: {}", e),
                                         ));
@@ -154,6 +174,7 @@ fn run_event_loop(
                         }
                     } else {
                         update(app, m);
+                        app.needs_render = true;
                     }
                 }
             }
@@ -165,6 +186,7 @@ fn run_event_loop(
                 *scan_spawned = false;
             }
             update(app, msg);
+            app.needs_render = true;
         }
 
         // Spawn scan if scanning flag is set and we haven't spawned one yet
@@ -178,6 +200,7 @@ fn run_event_loop(
             if let Some(last) = app.last_auto_refresh {
                 if last.elapsed() >= AUTO_REFRESH_INTERVAL {
                     app.scanning = true;
+                    app.needs_render = true;
                     spawn_scan(tx.clone());
                     *scan_spawned = true;
                 }

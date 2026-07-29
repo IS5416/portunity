@@ -85,6 +85,12 @@ pub struct App {
 
     /// Currently active tab index (0=Overview, 1=Ports, 2=History, 3=Traffic, 4=Firewall).
     pub active_tab: usize,
+
+    /// Whether the display needs a re-render (set on any state mutation).
+    pub needs_render: bool,
+
+    /// Instant of the last render, for minimum refresh interval.
+    pub last_render: Option<Instant>,
 }
 
 impl App {
@@ -115,6 +121,8 @@ impl App {
             admin_check_done: false,
             elevating: false,
             active_tab: 0,
+            needs_render: true, // first frame always renders
+            last_render: None,
         }
     }
 

@@ -26,7 +26,9 @@ pub fn update(app: &mut App, msg: Message) {
             app.error = None;
         }
         Message::ScanComplete(connections) => {
-            app.ports = connections;
+            // Merge new scan data into existing list, preserving row order
+            // for ports that persist between scans. New ports appear at end.
+            app.ports = merge_scan_results(&app.ports, connections);
             app.scanning = false;
             app.error = None;
             app.last_scan_time = Some(Instant::now());
@@ -34,7 +36,7 @@ pub fn update(app: &mut App, msg: Message) {
             // Re-apply active search or filter to new data
             if app.search_active && !app.search_query.is_empty() {
                 app.filtered_ports = filter::fuzzy_search(&app.ports, &app.search_query);
-            } else if app.filter_active {
+            } else if app.filter_active || app.filter_applied {
                 app.filtered_ports = filter::apply_filters(&app.ports, &app.active_filter);
             } else {
                 app.filtered_ports = app.ports.clone();
@@ -246,6 +248,42 @@ fn recalc_search(app: &mut App) {
     }
 }
 
+/// Merge new scan results into the existing port list.
+///
+/// Ports that exist in both old and new lists keep their position.
+/// Ports only in new appear at the end. Ports only in old are dropped.
+/// This prevents the entire table from shifting on every auto-refresh.
+fn merge_scan_results(
+    old: &[port_core::models::Connection],
+    new: Vec<port_core::models::Connection>,
+) -> Vec<port_core::models::Connection> {
+    use port_core::models::Connection;
+    use std::collections::HashMap;
+
+    // Index new connections by (port_number, protocol)
+    let mut new_map: HashMap<(u16, port_core::models::Protocol), Connection> = HashMap::new();
+    for c in new {
+        new_map.insert((c.port.number, c.port.protocol), c);
+    }
+
+    let mut result: Vec<Connection> = Vec::with_capacity(new_map.len());
+
+    // First pass: keep existing order for ports that still exist
+    for old_conn in old {
+        let key = (old_conn.port.number, old_conn.port.protocol);
+        if let Some(updated) = new_map.remove(&key) {
+            result.push(updated);
+        }
+    }
+
+    // Second pass: append brand-new ports (sorted by port number for stability)
+    let mut newcomers: Vec<Connection> = new_map.into_values().collect();
+    newcomers.sort_by_key(|c| c.port.number);
+    result.extend(newcomers);
+
+    result
+}
+
 /// Parse the current focused field's text buffer into active_filter.
 fn parse_filter_buffer(app: &mut App) {
     let field = app.filter_focused_field.clone();
@@ -327,7 +365,7 @@ fn sort_ports(app: &mut App) {
     let ascending = matches!(app.sort_order, SortOrder::Ascending);
 
     // Sort the active data view
-    let data = if app.search_active || app.filter_active {
+    let data = if app.search_active || app.filter_active || app.filter_applied {
         &mut app.filtered_ports
     } else {
         &mut app.ports
