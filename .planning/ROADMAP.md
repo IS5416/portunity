@@ -132,7 +132,7 @@ Plans:
 
 | Phase | Requirements | Success Criteria | Status | Completed |
 |-------|-------------|-----------------|--------|-----------|
-| 1. TUI Port Viewer | 19 | 5 | Complete | 2026-07-28 |
+| 1. TUI Port Viewer | 19 | 5 | In Progress|  |
 | 2. Process Management & Smart Kill | 8 | 5 | Not started | - |
 | 3. Real-Time Monitoring & History | 9 | 5 | Not started | - |
 | 4. Firewall Management & Export | 9 | 5 | Not started | - |

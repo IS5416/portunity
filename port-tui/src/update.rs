@@ -39,8 +39,11 @@ pub fn update(app: &mut App, msg: Message) {
             } else {
                 app.filtered_ports = app.ports.clone();
             }
-            // Reset selection to top on new data, clamped to display data
-            app.selected_index = 0;
+            // Preserve selection across refreshes; clamp if data shrank
+            let len = display_len(app);
+            if app.selected_index >= len {
+                app.selected_index = len.saturating_sub(1);
+            }
             // Re-apply current sort
             sort_ports(app);
         }

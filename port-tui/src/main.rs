@@ -125,6 +125,11 @@ fn run_event_loop(
         // Poll for keyboard events with timeout (D-10)
         if event::poll(Duration::from_millis(200))? {
             if let Event::Key(key) = event::read()? {
+                // Only process key press events — skip Release/Repeat
+                // to prevent double-firing of all keyboard actions.
+                if key.kind != event::KeyEventKind::Press {
+                    continue;
+                }
                 let msg = map_key_event(key, app);
                 if let Some(m) = msg {
                     // Intercept ElevateRequest: spawn blocking elevation task

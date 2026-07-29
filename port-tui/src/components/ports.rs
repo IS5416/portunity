@@ -233,6 +233,7 @@ impl Component for PortsComponent {
                     .style(rev_style)
                 } else {
                     let symbol_style = Style::default().fg(color).bg(bg);
+                    let label_style = Style::default().fg(color).bg(bg);
                     let text_style = Style::default().fg(theme.fg_default).bg(bg);
                     let proc_style = if system_dim {
                         text_style.add_modifier(Modifier::DIM)
@@ -244,7 +245,7 @@ impl Component for PortsComponent {
                         Cell::from(Text::from(Line::from(vec![
                             Span::styled(symbol, symbol_style),
                             Span::styled(" ", text_style),
-                            Span::styled(label, text_style),
+                            Span::styled(label, label_style),
                         ]))),
                         Cell::from(Text::styled(
                             conn.port.number.to_string(),
