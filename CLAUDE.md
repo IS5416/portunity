@@ -23,8 +23,8 @@ port-gui/      Tauri v2 + Svelte desktop app
 
 - When presenting options, always provide analysis, reasoning, and a recommendation. Don't just list choices.
 - When user raises a feature/question, first give your own analysis and extension suggestions, then confirm direction.
-- Use English for code, commits, docs consumed by agents. Provide Chinese translations (`.zh.md`) for human reading.
-- Every planning artifact (REQUIREMENTS.md, ROADMAP.md, research/*.md, etc.) MUST have a corresponding `.zh.md` Chinese version. Generate the `.zh.md` immediately after writing the English original.
+- Docs are English-only: code, commits, planning artifacts (REQUIREMENTS.md, ROADMAP.md, research/*.md, etc.) are written in English with no `.zh.md` translations. `.planning/**/*.zh.md` is gitignored.
+- Only `README.md` maintains a bilingual pair (`README.md` English + `README.zh.md` Chinese). Translate on explicit request only.
 - Caveman mode active (full): drop articles/filler/pleasantries. Fragments OK. Code/commits: write normal.
 - Commit format: `type: short description` (e.g. `docs: update state`). No `Co-Authored-By` trailers, no `@xxx` author wrappers. Keep under 72-char subject unless message body is exceptionally large and needs multi-line context.
 - Rust module style: new-style (edition 2018+). Leaf modules → `module_name.rs`. Modules with sub-modules → `module_name.rs` + `module_name/` directory. No `mod.rs` files.
