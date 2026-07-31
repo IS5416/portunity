@@ -75,7 +75,7 @@ Row 10: │ Hint: Press x to terminate | …confirmation required    │
 Row 11: └───────────────────────────────────────────────────────┘
 ```
 
-Label column: fixed 17 chars (`"Executable path:"` = 16 + space), value column takes the rest. Values truncate (see UI Considerations §overflow).
+Label column: fixed 17 chars (`"Executable path:"` = 16 + space), value column takes the rest. Values truncate (see UI Considerations §overflow). Process names embedded in fixed-width chrome (title row, footer suffixes, confirm dialog) truncate with `…` per the rule in Copywriting §Footer.
 
 ### Whitelist Overlay Internal Layout (20 rows at 80x24)
 
@@ -251,15 +251,17 @@ No kill path exists for built-in entries — `x` on a hard-blocked process never
 
 ### Footer (context-sensitive, locked strings)
 
-Single-space separators keep every footer ≤ 80 cols at minimum terminal size. **Delta: on the Ports tab, `[a]Elevate` moves out of the footer** — the persistent status bar indicator `Admin needed — press a to elevate` (D-09) already covers it, and the four new keys otherwise overflow 80 cols. Other tabs keep the Phase 1 footer.
+Single-space separators keep every footer ≤ 80 cols at minimum terminal size. **Delta: on the Ports tab, `[a]Elevate` moves out of the footer** — the persistent status bar indicator `Admin needed — press a to elevate` (D-09) already covers it — **and `[s]Sort` + `[w]List` drop out of the footer** (with all Phase 2 keys present the full set renders 89 cols, exceeding the 80-col gate). `s` and `w` remain bound; both stay documented in the Help overlay, and `w` is additionally surfaced by the hard-block status-bar message ("Press w to review the whitelist"). Other tabs keep the Phase 1 footer.
 
 | Context | Footer (exact string) |
 |---------|------------------------|
-| Ports tab, no overlay (both admin states) | `[jk]Move [/]Search [f]Filter [s]Sort [d]Detail [x]Kill [w]List [r]Refresh [q]Quit [?]Help` |
-| Detail panel open | `[Esc]Close [j/k]Next port [x]Kill [r]Refresh  —  detail for {name}` |
-| Confirm dialog open | `[y]Confirm kill [n]Cancel  —  {name} is on your protection list` |
+| Ports tab, no overlay (both admin states) | `[jk]Move [/]Search [f]Filter [d]Detail [x]Kill [r]Refresh [q]Quit [?]Help` — 73 cols, within the 80-col gate |
+| Detail panel open | `[Esc]Close [j/k]Next port [x]Kill [r]Refresh  —  detail for {name}` — fixed prefix 66 cols; `{name}` truncates with `…` to `term_width − 66` (14 cols at the 80-col minimum) |
+| Confirm dialog open | `[y]Confirm kill [n]Cancel  —  {name} is on your protection list` — fixed prefix + suffix total 63 cols; `{name}` truncates with `…` to `term_width − 63` (17 cols at the 80-col minimum) |
 | Whitelist overlay open | `[j/k]Move [d]Delete [Tab]Focus [Enter]Add [Esc]Close` |
 | Other tabs | Phase 1 footers unchanged (search/filter modes keep Phase 1 strings) |
+
+**`{name}` truncation rule (footer + dialog chrome):** any process basename embedded in fixed-width chrome truncates with `…` (U+2026) to the declared per-surface budget — truncate, never wrap, and never let the combined string exceed `term_width`. Same rule applies to `{name}` in the detail panel title row (Layout §Detail Panel, Row 0) and confirm dialog Line 1, whose inline widths are fixed at the 80-col minimum. Budgets are width-relative (`term_width − L`), so full names render at wide terminals and only the 80-col minimum truncates.
 
 ---
 
@@ -335,7 +337,7 @@ Single-space separators keep every footer ≤ 80 cols at minimum terminal size. 
 
 ### Help Overlay
 
-L2 section gains `[d] Detail`, `[x] Kill`, `[w] Whitelist`; new L2-confirm section `[y] Confirm kill · [n] Cancel`. Help overlay layout/content otherwise unchanged.
+L2 section gains `[d] Detail`, `[x] Kill`, `[w] Whitelist`; `[s] Sort` (Phase 1) remains — the Help overlay is the canonical reference for the footer-dropped keys `s` and `w`. New L2-confirm section `[y] Confirm kill · [n] Cancel`. Help overlay layout/content otherwise unchanged.
 
 ### No New Dependencies
 
