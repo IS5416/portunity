@@ -22,6 +22,9 @@ port-gui/src-tauri/target/
 # Svelte
 .svelte-kit/
 
+# AI tool artifacts
+.omo/
+
 # OS
 Thumbs.db
 .DS_Store

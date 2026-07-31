@@ -3,10 +3,10 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: in_progress
-last_updated: "2026-07-28T10:41:33Z"
+last_updated: "2026-07-31T00:00:00Z"
 progress:
-  total_phases: 1
-  completed_phases: 0
+  total_phases: 6
+  completed_phases: 1
   total_plans: 4
   completed_plans: 4
 ---
@@ -71,7 +71,7 @@ progress:
 
 ### Key TODOs across phases
 
-- [ ] **Phase 1:** Set up single Cargo workspace; implement dual-stack TCP/UDP scanner with buffer retry; build Ratatui Elm Architecture main loop with VirtualTable
+- [x] **Phase 1:** Set up single Cargo workspace; implement dual-stack TCP/UDP scanner with buffer retry; build Ratatui Elm Architecture main loop with VirtualTable — COMPLETE
 - [ ] **Phase 2:** Implement ProcessHandle safety wrapper; build shipped system-critical whitelist (~30 processes); implement smart kill escalation
 - [ ] **Phase 3:** Integrate ferrisetw with startup orphan cleanup; build lock-free callback-to-async bridge; implement SQLite history append-only log
 - [ ] **Phase 4:** Build COM firewall rule CRUD abstraction; implement right-click quick actions; implement JSON/CSV export
@@ -80,26 +80,26 @@ progress:
 
 ### Blockers
 
-(None — ready to plan Phase 1)
+(None — Phase 1 complete, ready to plan Phase 2)
 
 ## Performance Metrics
 
 | Metric | Current | Target | Phase |
 |--------|---------|--------|-------|
-| Port scan time (1000 ports) | N/A | < 500ms | 1 |
-| Memory (idle, TUI) | N/A | < 50MB | 1 |
-| TUI scroll latency (5000 rows) | N/A | < 50ms | 1 |
+| Port scan time (1000 ports) | TBD | < 500ms | 1 |
+| Memory (idle, TUI) | TBD | < 50MB | 1 |
+| TUI scroll latency (5000 rows) | TBD | < 50ms | 1 |
 | ETW events dropped | N/A | 0 under 100 conn/sec | 3 |
 | Binary size (TUI, release) | 1.1MB | < 10MB stripped | 1 | Actual: 1.1MB — well under 10MB target |
 | SQLite concurrent access | N/A | No BUSY errors, dual-frontend | 3 |
 
 ## Session Continuity
 
-- **Last action:** Plan 01-04 executed — tab system (Overview tab, 3 placeholder tabs, tab bar, resize gate) + release build optimization + SKELETON.md (2 tasks, 2 commits: fdd04a5, 2d42183)
-- **Next action:** Phase complete — transition to Phase 2 (Process Management & Smart Kill)
-- **Research flags:** Phase 2 (ProcessHandle safety wrapper, smart kill escalation, system whitelist), Phase 3 (ETW event schemas), Phase 5 (Tauri system tray + Svelte reactive stores), Phase 6 (windows-wfp API completeness, SQLite FTS5 faceted query syntax)
+- **Last action:** Phase 1 (TUI Port Viewer) fully executed and verified — 13 commits, UAT 10/10 passed. Human verification found and fixed 9 bugs (keyboard double-fire, sort cycle, filter input model, screen flash).
+- **Next action:** `/gsd-plan-phase 2` to create detailed plan for Phase 2: Process Management & Smart Kill
+- **Research flags:** Phase 2 (ProcessHandle safety wrapper, smart kill escalation, system whitelist), Phase 3 (ETW event schemas), Phase 5 (Tauri system tray), Phase 6 (windows-wfp API, SQLite FTS5)
 
 ---
 
 *State initialized: 2026-07-26*
-*Last updated: 2026-07-26 after roadmap creation*
+*Last updated: 2026-07-31 after Phase 1 completion*

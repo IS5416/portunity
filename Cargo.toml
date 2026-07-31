@@ -10,7 +10,7 @@ members = [
 version = "0.1.0"
 edition = "2024"
 license = "MIT"
-repository = "https://github.com/user/portunity"
+repository = "https://github.com/IS5416/portunity"
 
 [workspace.dependencies]
 thiserror = "2"
