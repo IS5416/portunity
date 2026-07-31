@@ -57,7 +57,14 @@ Plans:
   4. User cannot accidentally kill system-critical processes (smss.exe, csrss.exe, lsass.exe, svchost.exe, etc.) — attempting to kill a protected process shows a clear, non-technical explanation that this would crash the system
   5. User can add or remove processes from the protection whitelist via settings; whitelist changes take effect immediately without restart
 
-**Plans:** TBD
+**Plans:** 3 plans
+
+Plans:
+
+- [ ] 02-01-PLAN.md — Smart kill: core escalation pipeline (ProcessSnapshot, whitelist gate, graceful→timeout→force) + TUI kill surface (x key, confirm dialog, status bar outcomes, auto-refresh)
+- [ ] 02-02-PLAN.md — Process detail inspection: core detail fetchers (path/cmdline/start/parent/signature), scan-time protection markers, 12-row detail panel, ◆ table markers
+- [ ] 02-03-PLAN.md — Whitelist management overlay (w key, validated add/remove, instant effect) + Help overlay (? key) + SRCH-02 verification & traceability
+
 **UI hint:** yes
 
 ### Phase 3: Real-Time Monitoring & History
