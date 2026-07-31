@@ -1,7 +1,8 @@
 ---
 phase: 2
 slug: process-management-smart-kill
-status: draft
+status: approved
+reviewed_at: 2026-07-31
 framework: Ratatui 0.30.2
 terminal_backend: crossterm 0.29.0
 widget_ecosystem: ratatui core widgets only (no new third-party widgets)
@@ -347,25 +348,46 @@ Detail/confirm/whitelist surfaces use `Clear`, `Paragraph`, `List`, `Block` — 
 
 ## UI Considerations
 
-> Populated via the UI-consideration probe. Phase 2 surfaces: detail panel (form-like fields), confirm dialog (interactive-control), whitelist overlay (list-collection + form input), protection marker (list-collection row), status bar outcomes (static-content).
+> Populated via the UI-consideration probe (engine-grounded, resolved under auto conventions: backstop floor, upgraded to covered where the contract declares a criterion; unclassified stays unresolved — never auto-dismissed). Phase 2 surfaces: detail panel (form-like fields), confirm dialog (interactive-control), whitelist overlay (list-collection + form input), protection marker (table row adornment), status bar outcomes (message surface), context-sensitive footers.
 
-Applicable state considerations resolved: 12 covered, 1 backstop, 0 unresolved.
+Applicable state considerations resolved: 26 covered, 4 backstop, 1 unresolved.
 
 | Category | Element(s) | Status | Resolution / Reason |
 |----------|------------|--------|---------------------|
 | empty | Detail panel, no selection | ✅ covered | "No port selected — use j/k to move through the list" renders muted in panel body |
-| empty | Whitelist user list, zero entries | ✅ covered | "No user-protected processes. Enter a path below and press Enter to add." — input remains active |
 | loading | Detail data fetch (D-08) | ✅ covered | Fields render "Loading details…" until `DetailDataLoaded`; name/PID from scan data show immediately |
 | loading | Signature verification (D-07) | ✅ covered | Signature row renders "Verifying…" then Signed/Unsigned/Unknown on `SignatureVerified` |
-| error | Kill access denied (D-03) | ✅ covered | Status bar red `✗ Cannot terminate … admin rights needed. Press a to elevate.`; no auto-elevate |
-| error | Kill failed — other | ✅ covered | Status bar red `✗ Failed to terminate {name} (PID {pid}): {reason}`; previous table data preserved |
-| error | Detail fetch failure | ✅ covered | Unavailable fields render `—` dim; panel keeps name/PID from scan data (Phase 1 SCAN-07 precedent) |
+| error | Detail fetch failure | ✅ covered | Unavailable fields render `—` dim; panel keeps name/PID from scan data (Phase 1 SCAN-07 precedent); close and re-open to retry |
+| populated | Detail panel, full data | ✅ covered | All 9 fields render; protection badge reflects whitelist membership; hint row matches kill path (instant / confirmation required / cannot terminate) |
 | partial | Non-admin limited detail | ✅ covered | Path/command line/signature render `—` dim until elevated; elevation via `a` |
 | partial | Process exits while panel open | ✅ covered | Name strikethrough + Status row "Exited" on `ProcessExited`; signature caches invalidated |
-| populated | Detail panel, full data | ✅ covered | All 9 fields render; protection badge reflects whitelist membership; hint row matches kill path |
-| overflow | Long command line / path | ✅ covered | Command line truncates right with `…`; path truncates keeping right segment (`…\dir\name.exe`) — no wrapping |
-| zero-one-many | User whitelist entries | ✅ covered | Zero: empty-state copy. One+: scrollable selectable list with Phase 1 scrollbar pattern; `d` deletes selected |
-| long-text | Command line (full value) | 🧪 backstop | Held-out visual test: a process with >60-char command line renders truncated with `…`, no wrap, no overflow into the next row |
+| overflow | Long command line / path | ✅ covered | Command line truncates right with `…`; path truncates keeping right segment (`…\dir\name.exe`) — never wraps |
+| zero-one-many | Detail panel selection | ✅ covered | Zero: no-selection copy. One+: panel reflects currently selected connection; selection change refreshes (D-06) |
+| long-text | Command line (full value) | 🧪 backstop | { statement: "A process with >60-char command line renders truncated with `…`, no wrap, no overflow into the next row", verification: backstop } |
+| overflow | Confirm dialog, long names | ✅ covered | 60×7 fixed popup; Line 1 `{name}` truncates with `…` to `term_width − 63`; never wraps, never exceeds term_width |
+| long-text | Confirm dialog, long names | ✅ covered | Same truncation rule as footer chrome; reason string is fixed-length by design |
+| empty | Whitelist user list, zero entries | ✅ covered | "No user-protected processes. Enter a path below and press Enter to add." — input remains active |
+| loading | Whitelist data load | 🧪 backstop | { statement: "Whitelist overlay opens with data on first render (synchronous settings.toml read, <1ms); no loading state exists by design", verification: backstop } |
+| error | Whitelist add-path failure | 🧪 backstop | { statement: "Adding an invalid/nonexistent path shows a status bar error and the entry is not added", verification: backstop } |
+| populated | Whitelist overlay, full data | ✅ covered | Built-in 9 rows (read-only, ◆ prefix) + user list rows; Phase 1 scrollbar pattern on overflow |
+| partial | Built-in list longer than 9 rows | ✅ covered | Built-in section scrollable via `j`/`k` when user list empty; user list min 5 rows scrollable |
+| overflow | Whitelist lists | ✅ covered | Both lists scrollable with Phase 1 scrollbar (`│` track, `█` thumb) when content overflows |
+| zero-one-many | User whitelist entries | ✅ covered | Zero: empty-state copy. One+: scrollable selectable list; `d` deletes selected; scrollbar visible when overflowing |
+| long-text | User whitelist full paths | 🧪 backstop | { statement: "Long full-path entries in the user list truncate with `…` without wrapping", verification: backstop } |
+| empty | Protection marker (table rows) | ✅ covered | Marker is a per-row adornment; table-level empty state inherited unchanged from Phase 1 contract |
+| loading | Protection marker | ✅ covered | Marker is static per-row adornment rendered from whitelist membership at render time; no loading state by design |
+| error | Protection marker | ✅ covered | Marker is static adornment; kill-path errors surface in status bar / dialog (D-04), never in the marker |
+| populated | Protection marker | ✅ covered | `◆` in `status.error` for built-in entries, `◆` in `status.warning` for user entries, none otherwise; admin full brightness, non-admin dimmed |
+| partial | Protection marker, non-admin | ✅ covered | Protected rows dim in non-admin sessions (limited detail, SCAN-07/D-09 precedent); marker still shown |
+| overflow | Protection marker + long name | ✅ covered | `◆` prefix + process name truncates per table column handling; no wrap |
+| zero-one-many | Protection marker | ✅ covered | Marker is per-row; count tracks the visible list — no copy implications |
+| long-text | Protection marker + long name | ✅ covered | Same truncation as footer `{name}` rule (`…`, never wrap) |
+| empty | Status bar kill outcomes | ⚠ unresolved | Engine classified E5 as unclassified (manual-review nudge). Status-bar message surface: 8 locked kill-outcome strings (Copywriting §Kill Flow Copy) — planner must treat as assumption: verify all 8 render at ≤80 cols with declared overflow handling |
+| error | Status bar kill outcomes | ⚠ unresolved | Same surface as above — planner assumption: hard-block message (127 fixed chars + name at 80-col minimum) needs declared truncation preserving the actionable tail ("Press w to review the whitelist") |
+| loading | Footers | ✅ covered | Footers are static locked strings per overlay state; no loading state by design |
+| error | Footers | ✅ covered | Footer content is independent of error state; error surfaces in status bar (D-04) |
+| overflow | Footers | ✅ covered | Ports-tab footer 73 cols ≤ 80 gate; `{name}` truncates with `…` to `term_width − L` per declared budget; never wraps, never exceeds term_width |
+| long-text | Footers | ✅ covered | Same truncation rule (`…`, width-relative budgets, full names at wide terminals) |
 
 <!-- Status vocabulary (locked by probe-core projectTruths):
      ✅ covered   → a plain truth string lifted into must_haves.truths
@@ -392,11 +414,11 @@ No shadcn registry applies (TUI project). No third-party widget registries in pl
 
 ## Checker Sign-Off
 
-- [ ] Dimension 1 Copywriting: PASS
-- [ ] Dimension 2 Visuals: PASS
-- [ ] Dimension 3 Color: PASS
-- [ ] Dimension 4 Typography: PASS
-- [ ] Dimension 5 Layout & Spacing: PASS
-- [ ] Dimension 6 Widget Safety: PASS
+- [x] Dimension 1 Copywriting: PASS
+- [x] Dimension 2 Visuals: PASS
+- [x] Dimension 3 Color: PASS
+- [x] Dimension 4 Typography: PASS
+- [x] Dimension 5 Layout & Spacing: PASS (1 non-blocking FLAG: status-bar overflow rule undeclared — surfaced in UI Considerations ⚠ unresolved)
+- [x] Dimension 6 Widget Safety: PASS
 
-**Approval:** pending
+**Approval:** approved — 2026-07-31 (checker `a98e845ea3de57825`, revision `19351f7`)
