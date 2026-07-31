@@ -563,27 +563,31 @@ let st = std::time::UNIX_EPOCH + std::time::Duration::from_secs(unix_secs);
 | A8 | `WTD_CACHE_ONLY_URL_RETRIEVAL` flag choice for WinVerifyTrustEx (offline cache-first) | Code Example 4 | Blocks online revocation lookup; for a port tool, offline-first is correct (no hang on network). If revocation matters, use default flags |
 | A9 | Status-bar overflow: hard-block message (127 chars + name) needs truncation preserving "Press w to review the whitelist" tail | (UI-SPEC ⚠ unresolved) | Planner MUST declare the truncation rule per UI-SPEC UI Considerations (tail-anchored, `…`); all 8 kill-outcome strings must fit ≤80 cols |
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **Built-in whitelist exact membership (Assumption A1).**
    - What we know: Microsoft's official critical-services list (smss/csrss/wininit/winlogon/services/lsass/System/svchost-RPCSS) + session/security additions; svchost.exe covers all instances (can't distinguish RPCSS-hosting instances by name alone).
    - What's unclear: Whether to include debatable entries (spoolsv, audiodg, explorer.exe — restarts itself; MsMpEng — PPL-protected anyway) to reach "~30".
    - Recommendation: ship Tier-1 (official, ~14) + Tier-2 session/security (~12–16) = 26–30; keep each with a plain-language reason (UI-SPEC row format); human-verify the constant at execution (checkpoint), document the reasoning for each entry in the source.
+   - **RESOLVED:** Tier-1 + Tier-2 = 26–30 entries with plain-language reasons, shipped as `BUILTIN` in plan 02-01 Task 1 step 5; the final constant is human-verified at execution via the Task 1 human-check.
 
 2. **User whitelist entry validation strictness (UI-SPEC backstop: "invalid/nonexistent path → error, not added").**
    - What we know: Entries are full paths; matching is normalized case-insensitive full-path compare.
    - What's unclear: Should an add require file-existence at add time? (A path may be valid later — e.g., app being updated; but the UI-SPEC backstop says nonexistent → error.)
    - Recommendation: require absolute-path syntax (drive/UNC prefix), strip quotes, resolve 8.3 via GetLongPathNameW when the file exists, and reject nonexistent paths per the approved UI-SPEC backstop (consistent, predictable).
+   - **RESOLVED:** absolute-path syntax required, quotes stripped, 8.3 resolved via GetLongPathNameW when the file exists, nonexistent paths rejected per the UI-SPEC backstop — implemented as `validate_user_entry`/`normalize_user_entry` in plan 02-03 Task 1.
 
 3. **Signature "Signed" vs "Trusted" semantics.**
    - What we know: WinVerifyTrust GENERIC_VERIFY_V2 with WTD_REVOKE_NONE returns 0 for any valid signature chain (including self-signed certs in the root store); TRUST_E_NOSIGNATURE for unsigned.
    - What's unclear: Whether "Signed" should mean "any signature" or "signed by a trusted publisher" (requires additional cert-chain trust check).
    - Recommendation: "any valid signature" (0) is the pragmatic D-07 scope; document the limitation in the detail panel copy — do not attempt trusted-publisher semantics this phase.
+   - **RESOLVED:** "any valid signature" (WinVerifyTrust 0) is the D-07 scope; the limitation is documented in the detail-panel copy — implemented in plan 02-02 Task 1 (`verify_signature` scope comment).
 
 4. **`svchost.exe` hard-block granularity.**
    - What we know: The requirement names svchost.exe as protected; all svchost instances share the name (basename match protects all).
    - What's unclear: A user might legitimately want to kill one svchost instance hosting a dev service; the hard-block forbids it entirely (no per-instance override exists in the model).
    - Recommendation: accept the coarse rule per D-09 (safety floor; the whitelist UI documents "all svchost instances"); note as a future refinement candidate (per-service protection) — do not build in Phase 2.
+   - **RESOLVED:** coarse name-based rule accepted per D-09 (safety floor); the Help overlay note documents that all instances of a built-in name (e.g. svchost.exe) are protected (plan 02-03 Task 2); per-service protection remains a future refinement candidate — not built in Phase 2.
 
 ## Environment Availability
 

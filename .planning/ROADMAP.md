@@ -60,9 +60,16 @@ Plans:
 **Plans:** 3 plans
 
 Plans:
+**Wave 1**
 
 - [ ] 02-01-PLAN.md — Smart kill: core escalation pipeline (ProcessSnapshot, whitelist gate, graceful→timeout→force) + TUI kill surface (x key, confirm dialog, status bar outcomes, auto-refresh)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
 - [ ] 02-02-PLAN.md — Process detail inspection: core detail fetchers (path/cmdline/start/parent/signature), scan-time protection markers, 12-row detail panel, ◆ table markers
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
 - [ ] 02-03-PLAN.md — Whitelist management overlay (w key, validated add/remove, instant effect) + Help overlay (? key) + SRCH-02 verification & traceability
 
 **UI hint:** yes
