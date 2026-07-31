@@ -141,6 +141,7 @@ mod tests {
                 start_time: None,
                 is_signed: None,
                 is_system_critical: false,
+                user_protected: false,
                 parent_pid: None,
             },
             remote_address: None,
