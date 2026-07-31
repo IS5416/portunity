@@ -36,3 +36,6 @@ Thumbs.db
 
 # Planning docs: English-only (bilingual README only)
 .planning/**/*.zh.md
+
+# GSD research cache
+.planning/research/.cache/
