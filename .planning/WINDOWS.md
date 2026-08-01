@@ -1,10 +1,10 @@
 ---
 schema_version: 1
-open_count: 4
+open_count: 6
 waived_count: 0
 fixed_count: 0
-total_count: 4
-last_updated: 2026-07-28T10:44:27.947Z
+total_count: 6
+last_updated: 2026-08-01T02:07:49.617Z
 ---
 
 # Broken Windows Ledger
@@ -19,6 +19,8 @@ last_updated: 2026-07-28T10:44:27.947Z
 | 2 | 01 | stub | port-tui/src/components/traffic.rs |  | Placeholder tab: 'Coming later' — content deferred to Phase 3 | open |  | 2026-07-28T10:44:27.197Z |  |
 | 3 | 01 | stub | port-tui/src/components/firewall.rs |  | Placeholder tab: 'Coming later' — content deferred to Phase 4 | open |  | 2026-07-28T10:44:27.539Z |  |
 | 4 | 01 | deviation | port-tui/src/components/overview.rs |  | Rule 1: Replaced 'Local Addr' column with 'Proto' in top ports mini-table — Connection model lacks local_address field | open |  | 2026-07-28T10:44:27.947Z |  |
+| 5 | 02 | stub | port-core/src/process.rs |  | WindowsProcessManager::details() returns Err(not yet implemented) - info.rs lands in plan 02-02 | open |  | 2026-08-01T02:07:49.191Z |  |
+| 6 | 02 | stub | port-tui/src/message.rs | 216 | Message::KillExecute declared but never constructed - future kill paths (plan 02-03) may emit it | open |  | 2026-08-01T02:07:49.617Z |  |
 
 ````json
 [
@@ -68,6 +70,30 @@ last_updated: 2026-07-28T10:44:27.947Z
     "status": "open",
     "reason": "",
     "recorded_at": "2026-07-28T10:44:27.947Z",
+    "resolved_at": null
+  },
+  {
+    "id": 5,
+    "kind": "stub",
+    "phase": "02",
+    "file": "port-core/src/process.rs",
+    "line": null,
+    "description": "WindowsProcessManager::details() returns Err(not yet implemented) - info.rs lands in plan 02-02",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-08-01T02:07:49.191Z",
+    "resolved_at": null
+  },
+  {
+    "id": 6,
+    "kind": "stub",
+    "phase": "02",
+    "file": "port-tui/src/message.rs",
+    "line": 216,
+    "description": "Message::KillExecute declared but never constructed - future kill paths (plan 02-03) may emit it",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-08-01T02:07:49.617Z",
     "resolved_at": null
   }
 ]
