@@ -13,6 +13,7 @@ pub mod overview;
 pub mod history;
 pub mod traffic;
 pub mod firewall;
+pub mod kill_confirm;
 
 pub use ports::PortsComponent;
 pub use search::SearchComponent;
@@ -21,6 +22,7 @@ pub use overview::OverviewComponent;
 pub use history::HistoryTabComponent;
 pub use traffic::TrafficTabComponent;
 pub use firewall::FirewallTabComponent;
+pub use kill_confirm::KillConfirmComponent;
 
 /// Trait for renderable TUI components.
 ///

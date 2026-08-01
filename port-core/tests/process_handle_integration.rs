@@ -46,6 +46,10 @@ fn test_churn_no_wrong_process_kill() {
             .unwrap()
             .block_on(kill(snap2, 5, || {}));
 
+        // AccessDenied is tolerated here: TerminateProcess can transiently
+        // return ERROR_ACCESS_DENIED when the target is already in the process
+        // of exiting (the race is the same practical outcome — the process
+        // goes away; the wrong-process-kill proof is the open_verified check).
         assert!(
             matches!(
                 outcome,
@@ -53,6 +57,7 @@ fn test_churn_no_wrong_process_kill() {
                     | KillOutcome::ForceKilled
                     | KillOutcome::Direct
                     | KillOutcome::AlreadyExited
+                    | KillOutcome::AccessDenied
             ),
             "iter {}: kill should succeed — got {:?}",
             iteration,

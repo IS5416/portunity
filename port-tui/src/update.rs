@@ -6,10 +6,11 @@
 
 use std::time::Instant;
 
-use port_core::models::Filter;
 use port_core::filter;
+use port_core::models::Filter;
+use port_core::process::Protection;
 
-use crate::app::App;
+use crate::app::{format_kill_status, App, KillStatus, KillTone};
 use crate::message::{FilterField, Message, SortColumn, SortOrder};
 
 /// Process a message and mutate application state accordingly.
@@ -26,6 +27,9 @@ pub fn update(app: &mut App, msg: Message) {
             app.error = None;
         }
         Message::ScanComplete(connections) => {
+            // A completed scan invalidates the transient kill marker
+            // (drives row strikethrough until the freed port disappears).
+            app.last_killed_pid = None;
             // Merge new scan data into existing list, preserving row order
             // for ports that persist between scans. New ports appear at end.
             app.ports = merge_scan_results(&app.ports, connections);
@@ -221,6 +225,122 @@ pub fn update(app: &mut App, msg: Message) {
             if index < 5 {
                 app.active_tab = index;
             }
+        }
+
+        // --- Kill flow handlers (D-01..D-04, D-09) ---
+
+        Message::Kill { .. } => {
+            // Handled by the main event loop (spawn_blocking: snapshot_for +
+            // protection_status → KillPrepared). The update function records
+            // no state — the row is the kill target, captured at keypress.
+        }
+        Message::KillPrepared {
+            snapshot,
+            protection,
+            name,
+            pid,
+        } => {
+            match protection {
+                Protection::UserConfirm => {
+                    // Gate the kill behind the confirmation dialog (D-09).
+                    app.confirm_pid = Some(pid);
+                    app.confirm_name = Some(name);
+                    app.confirm_port = app
+                        .display_data()
+                        .get(app.selected_index)
+                        .filter(|c| c.process.pid == pid)
+                        .map(|c| c.port.number);
+                    app.pending_kill_snapshot = Some(snapshot);
+                }
+                Protection::HardBlocked(_) => {
+                    // Hard block — no kill path, no dialog (D-09).
+                    // The reason string is the built-in entry's plain-language
+                    // explanation; the status copy is the UI-SPEC locked string.
+                    app.kill_status = Some(KillStatus {
+                        text: format!(
+                            "✗ {} is protected — it is critical to Windows. Killing it would crash or destabilize your system. Press w to review the whitelist.",
+                            name
+                        ),
+                        tone: KillTone::Error,
+                    });
+                }
+                Protection::None => {
+                    // Handled by the drain-loop intercept (instant kill path) —
+                    // never reaches update().
+                }
+            }
+        }
+        Message::KillConfirmed { .. } => {
+            // Handled by the main event loop (spawn_blocking kill execution
+            // using the pending snapshot). No state mutation here.
+        }
+        Message::KillCancelled => {
+            // Dialog dismissed — process untouched (UI-SPEC L2-confirm).
+            app.confirm_pid = None;
+            app.confirm_name = None;
+            app.confirm_port = None;
+            app.pending_kill_snapshot = None;
+        }
+        Message::KillStart { name, pid } => {
+            // Graceful signal dispatched — in-progress status (D-04).
+            app.kill_status = Some(KillStatus {
+                text: format!(
+                    "Terminating {} (PID {}) — sending graceful close\u{2026}",
+                    name, pid
+                ),
+                tone: KillTone::InProgress,
+            });
+        }
+        Message::KillTimeout {
+            name,
+            pid,
+            timeout_secs,
+        } => {
+            // Graceful timeout hit — force kill in progress.
+            app.kill_status = Some(KillStatus {
+                text: format!(
+                    "Graceful close timed out ({}s) — force killing {} (PID {})\u{2026}",
+                    timeout_secs, name, pid
+                ),
+                tone: KillTone::InProgress,
+            });
+        }
+        Message::KillExecute { .. } => {
+            // Handled by the main event loop (intercept-owned).
+        }
+        Message::KillOutcome {
+            outcome,
+            name,
+            pid,
+        } => {
+            // Final outcome → status bar (D-04); clear the dialog + in-flight
+            // guard; successful kills trigger one immediate scan so the freed
+            // port disappears (D-04 auto-refresh).
+            let (text, tone) = format_kill_status(
+                &name,
+                pid,
+                &outcome,
+                app.kill_timeout_secs,
+                app.term_width,
+            );
+            app.kill_status = Some(KillStatus { text, tone });
+
+            app.kill_in_flight = false;
+            app.confirm_pid = None;
+            app.confirm_name = None;
+            app.confirm_port = None;
+            app.pending_kill_snapshot = None;
+
+            match outcome {
+                port_core::process::KillOutcome::Graceful
+                | port_core::process::KillOutcome::ForceKilled
+                | port_core::process::KillOutcome::Direct => {
+                    app.last_killed_pid = Some(pid);
+                }
+                _ => {}
+            }
+
+            app.scanning = true;
         }
     }
 }

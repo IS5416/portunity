@@ -5,6 +5,7 @@
 //! transforms application state.
 
 use port_core::models::Connection;
+use port_core::process::{KillOutcome, ProcessSnapshot, Protection};
 
 /// Sortable columns in the port table.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -174,4 +175,55 @@ pub enum Message {
 
     /// Switch to a tab by index (0=Overview, 1=Ports, 2=History, 3=Traffic, 4=Firewall).
     SwitchTab(usize),
+
+    // --- Kill flow messages (D-01..D-04, D-09) ---
+    //
+    // KillPrepared / KillExecute are internal flow messages beyond the UI-SPEC
+    // list (the UI-SPEC list covers user-facing messages; the two-stage gate
+    // needs the extra hops). KillPrepared carries the Send-safe snapshot +
+    // protection verdict so the drain loop can route: None -> instant kill,
+    // UserConfirm -> dialog, HardBlocked -> status message only.
+
+    /// User pressed 'x' on a selected row — request kill of its owning process.
+    Kill { pid: u32 },
+
+    /// Snapshot + protection verdict computed off the async runtime.
+    KillPrepared {
+        snapshot: ProcessSnapshot,
+        protection: Protection,
+        name: String,
+        pid: u32,
+    },
+
+    /// User confirmed the kill in the confirmation dialog (y / Enter).
+    KillConfirmed { pid: u32 },
+
+    /// User cancelled the confirmation dialog (n / Esc).
+    KillCancelled,
+
+    /// Kill execution started — graceful signal dispatched.
+    KillStart { name: String, pid: u32 },
+
+    /// Graceful timeout hit — force kill in progress.
+    KillTimeout {
+        name: String,
+        pid: u32,
+        timeout_secs: u64,
+    },
+
+    /// (Internal) execute the kill with an already-prepared snapshot.
+    ///
+    /// Declared per the plan's message contract (02-01 Task 2 step 1) for the
+    /// two-stage gate; the current flow intercepts KillPrepared directly in the
+    /// drain loop, so this variant is constructed by no producer yet — plan 02-03
+    /// (whitelist overlay) and future kill paths may emit it.
+    #[allow(dead_code)]
+    KillExecute { snapshot: ProcessSnapshot },
+
+    /// Final kill outcome for the status bar (D-04).
+    KillOutcome {
+        outcome: KillOutcome,
+        name: String,
+        pid: u32,
+    },
 }

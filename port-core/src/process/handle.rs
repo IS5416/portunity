@@ -63,8 +63,7 @@ impl Drop for OpenProcessHandle {
 fn open_with(pid: u32, rights: PROCESS_ACCESS_RIGHTS) -> crate::Result<OpenProcessHandle> {
     unsafe {
         let handle = OpenProcess(rights, false, pid).map_err(|e| {
-            let raw = e.code().0 as u32;
-            if raw == 5 {
+            if win32_error_code(&e) == 5 {
                 // ERROR_ACCESS_DENIED — surfaced as PermissionDenied
                 crate::Error::PermissionDenied(format!(
                     "Access denied opening process {} (may need admin rights)",
@@ -77,6 +76,15 @@ fn open_with(pid: u32, rights: PROCESS_ACCESS_RIGHTS) -> crate::Result<OpenProce
 
         Ok(OpenProcessHandle { handle })
     }
+}
+
+/// Extract the Win32 error code from a windows-rs error.
+///
+/// `windows::core::Error::code()` returns an HRESULT; Win32 API failures are
+/// encoded as `0x8007XXXX` where the low 16 bits hold the Win32 code
+/// (e.g. `0x80070005` = ERROR_ACCESS_DENIED = 5).
+fn win32_error_code(e: &windows::core::Error) -> u32 {
+    (e.code().0 as u32) & 0xFFFF
 }
 
 /// Capture a snapshot of a process — PID, creation time, and executable path.

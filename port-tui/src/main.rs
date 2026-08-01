@@ -17,6 +17,7 @@ use std::io::{self, stdout};
 use std::time::Duration;
 
 use anyhow::Result;
+use clap::Parser;
 use crossterm::event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode};
 use crossterm::execute;
 use crossterm::terminal::{
@@ -29,22 +30,43 @@ use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::Paragraph;
 use ratatui::{Frame, Terminal};
 
-use app::App;
+use app::{App, KillTone};
 use components::{
     Component, FilterPanelComponent, FirewallTabComponent, HistoryTabComponent,
-    OverviewComponent, PortsComponent, SearchComponent, TrafficTabComponent,
+    KillConfirmComponent, OverviewComponent, PortsComponent, SearchComponent,
+    TrafficTabComponent,
 };
 use message::Message;
 use theme::Theme;
 use update::update;
 
+use port_core::process::Protection;
 use port_core::scanner::PortScanner;
 
 /// Auto-refresh interval in seconds (D-11).
 const AUTO_REFRESH_INTERVAL: Duration = Duration::from_secs(5);
 
+/// CLI arguments for the TUI binary.
+#[derive(Parser)]
+#[command(name = "port-tui", about = "Portunity terminal port manager")]
+struct Args {
+    /// Helper mode: deliver Ctrl+C to the given console process (internal).
+    /// Spawned by the port-core kill pipeline with CREATE_NO_WINDOW.
+    #[arg(long = "ctrl-c", hide = true)]
+    ctrl_c_pid: Option<u32>,
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
+    let args = Args::parse();
+
+    // Helper mode guard (Pitfall 7): --ctrl-c <pid> must exit BEFORE terminal
+    // init / raw mode / event loop — the helper only signals a console.
+    if let Some(pid) = args.ctrl_c_pid {
+        let code = helper_send_ctrl_c(pid);
+        std::process::exit(code);
+    }
+
     // Init tracing for stderr (keeps TUI output clean)
     tracing_subscriber::fmt()
         .with_writer(io::stderr)
@@ -105,6 +127,40 @@ fn spawn_scan(tx: tokio::sync::mpsc::UnboundedSender<Message>) {
     });
 }
 
+/// Deliver Ctrl+C to a console process (helper mode, `--ctrl-c <pid>`).
+///
+/// Exit-code contract (documented in `port-core/src/process/kill.rs`):
+/// `0` = delivered, `1` = no console. The helper ignores CTRL_C in itself,
+/// detaches from its own hidden console, attaches to the target's console,
+/// and broadcasts CTRL_C_EVENT to all processes on that console (group 0).
+/// The helper cannot terminate anything — it only generates a console event.
+///
+/// Caveats: the event broadcasts to ALL processes on the target's console;
+/// CREATE_NEW_PROCESS_GROUP children ignore Ctrl+C; a pending ReadConsole may
+/// not be interrupted — delivery ≠ exit, the kill pipeline's WaitForSingleObject
+/// timeout is the real arbiter.
+fn helper_send_ctrl_c(pid: u32) -> i32 {
+    use windows::Win32::System::Console::{
+        AttachConsole, FreeConsole, GenerateConsoleCtrlEvent, SetConsoleCtrlHandler,
+        CTRL_C_EVENT,
+    };
+
+    unsafe {
+        // Ignore CTRL_C in the helper so the broadcast does not kill it.
+        let _ = SetConsoleCtrlHandler(None, true);
+        // Detach the helper's own (hidden) console — never the TUI's terminal.
+        let _ = FreeConsole();
+
+        match AttachConsole(pid) {
+            Ok(()) => {
+                let _ = GenerateConsoleCtrlEvent(CTRL_C_EVENT, 0);
+                0 // delivered
+            }
+            Err(_) => 1, // no console
+        }
+    }
+}
+
 /// Run the TEA event loop with auto-refresh and keyboard navigation.
 ///
 /// Renders on-demand: only redraws when state changes or the per-second
@@ -121,6 +177,11 @@ fn run_event_loop(
     const CLOCK_TICK: Duration = Duration::from_secs(1);
 
     loop {
+        // Track terminal width — truncation budget for status/footer strings
+        if let Ok(size) = terminal.size() {
+            app.term_width = size.width;
+        }
+
         // Render only when needed, but at least once per second for clock
         let now = std::time::Instant::now();
         let clock_due = app
@@ -154,27 +215,140 @@ fn run_event_loop(
                 }
                 let msg = map_key_event(key, app);
                 if let Some(m) = msg {
-                    // Intercept ElevateRequest: spawn blocking elevation task
-                    if matches!(m, Message::ElevateRequest) {
-                        if !app.elevating {
-                            app.elevating = true;
-                            let tx_elevate = tx.clone();
-                            tokio::task::spawn_blocking(move || {
-                                match elevate::elevate_to_admin() {
-                                    Ok(()) => {
-                                        let _ = tx_elevate.send(Message::ElevateDeclined);
+                    match m {
+                        // Intercept ElevateRequest: spawn blocking elevation task
+                        Message::ElevateRequest => {
+                            if !app.elevating {
+                                app.elevating = true;
+                                let tx_elevate = tx.clone();
+                                tokio::task::spawn_blocking(move || {
+                                    match elevate::elevate_to_admin() {
+                                        Ok(()) => {
+                                            let _ =
+                                                tx_elevate.send(Message::ElevateDeclined);
+                                        }
+                                        Err(e) => {
+                                            let _ = tx_elevate.send(Message::ScanError(
+                                                format!("Elevation failed: {}", e),
+                                            ));
+                                        }
                                     }
-                                    Err(e) => {
-                                        let _ = tx_elevate.send(Message::ScanError(
-                                            format!("Elevation failed: {}", e),
-                                        ));
-                                    }
-                                }
-                            });
+                                });
+                            }
                         }
-                    } else {
-                        update(app, m);
-                        app.needs_render = true;
+                        // Intercept Kill: snapshot + protection verdict off the
+                        // async runtime (two-stage gate, D-09/D-15)
+                        Message::Kill { pid } => {
+                            if !app.kill_in_flight && app.confirm_pid.is_none() {
+                                let name = app
+                                    .display_data()
+                                    .get(app.selected_index)
+                                    .map(|c| c.process.name.clone())
+                                    .unwrap_or_default();
+                                let tx_kill = tx.clone();
+                                tokio::task::spawn_blocking(move || {
+                                    match port_core::process::snapshot_for(pid) {
+                                        Err(e) => {
+                                            // Process gone or inaccessible —
+                                            // map to a truthful outcome.
+                                            let outcome = match e {
+                                                port_core::Error::PermissionDenied(
+                                                    _,
+                                                ) => {
+                                                    port_core::process::KillOutcome::AccessDenied
+                                                }
+                                                _ => port_core::process::KillOutcome::AlreadyExited,
+                                            };
+                                            let _ = tx_kill.send(Message::KillOutcome {
+                                                outcome,
+                                                name,
+                                                pid,
+                                            });
+                                        }
+                                        Ok(snap) => {
+                                            // D-15: settings re-read at kill time
+                                            let settings = port_core::config::load_settings()
+                                                .unwrap_or_else(|_| {
+                                                    port_core::config::default_settings()
+                                                });
+                                            let basename = snap
+                                                .executable_path
+                                                .as_deref()
+                                                .and_then(|p| {
+                                                    std::path::Path::new(p)
+                                                        .file_name()
+                                                        .and_then(|f| f.to_str())
+                                                })
+                                                .unwrap_or(&name);
+                                            let protection =
+                                                port_core::process::protection_status(
+                                                    snap.pid,
+                                                    basename,
+                                                    snap.executable_path.as_deref(),
+                                                    &settings,
+                                                );
+                                            let _ = tx_kill.send(Message::KillPrepared {
+                                                snapshot: snap,
+                                                protection,
+                                                name,
+                                                pid,
+                                            });
+                                        }
+                                    }
+                                });
+                            }
+                        }
+                        // Intercept KillConfirmed: execute the pending kill with
+                        // the verified snapshot (PROC-07)
+                        Message::KillConfirmed { pid: confirm_pid } => {
+                            let snapshot_ok = app
+                                .pending_kill_snapshot
+                                .as_ref()
+                                .is_some_and(|s| s.pid == confirm_pid);
+                            if snapshot_ok && !app.kill_in_flight {
+                                let snapshot = app.pending_kill_snapshot.take().unwrap();
+                                app.kill_in_flight = true;
+                                let name = app
+                                    .confirm_name
+                                    .clone()
+                                    .unwrap_or_else(|| "process".to_string());
+                                let pid = snapshot.pid;
+                                app.kill_timeout_secs = port_core::config::load_settings()
+                                    .map(|s| s.kill_timeout_secs)
+                                    .unwrap_or(5);
+                                let timeout = app.kill_timeout_secs;
+                                let tx_kill = tx.clone();
+                                let tx_timeout = tx_kill.clone();
+                                let name_timeout = name.clone();
+                                tokio::spawn(async move {
+                                    let _ = tx_kill.send(Message::KillStart {
+                                        name: name.clone(),
+                                        pid,
+                                    });
+                                    let outcome = port_core::process::kill(
+                                        snapshot,
+                                        timeout,
+                                        move || {
+                                            let _ = tx_timeout.send(Message::KillTimeout {
+                                                name: name_timeout.clone(),
+                                                pid,
+                                                timeout_secs: timeout,
+                                            });
+                                        },
+                                    )
+                                    .await;
+                                    let _ = tx_kill.send(Message::KillOutcome {
+                                        outcome,
+                                        name,
+                                        pid,
+                                    });
+                                });
+                            }
+                        }
+                        other => {
+                            update(app, other);
+                            app.needs_render = true;
+                        }
                     }
                 }
             }
@@ -182,10 +356,70 @@ fn run_event_loop(
 
         // Drain async channel (D-12: try_recv on each tick)
         while let Ok(msg) = rx.try_recv() {
-            if matches!(msg, Message::ScanComplete(_)) {
-                *scan_spawned = false;
+            match msg {
+                Message::ScanComplete(_) => {
+                    *scan_spawned = false;
+                    update(app, msg);
+                }
+                Message::KillPrepared {
+                    snapshot,
+                    protection,
+                    name,
+                    pid,
+                } => {
+                    // Instant-kill path for non-protected processes (PROC-03):
+                    // Protection::None never reaches update() — the kill task
+                    // is spawned directly with the incoming snapshot (same body
+                    // as the KillConfirmed path; guarded by kill_in_flight).
+                    if protection == Protection::None {
+                        if !app.kill_in_flight {
+                            app.kill_in_flight = true;
+                            app.kill_timeout_secs = port_core::config::load_settings()
+                                .map(|s| s.kill_timeout_secs)
+                                .unwrap_or(5);
+                            let timeout = app.kill_timeout_secs;
+                            let tx_kill = tx.clone();
+                            let tx_timeout = tx_kill.clone();
+                            let name_timeout = name.clone();
+                            tokio::spawn(async move {
+                                let _ = tx_kill.send(Message::KillStart {
+                                    name: name.clone(),
+                                    pid,
+                                });
+                                let outcome = port_core::process::kill(
+                                    snapshot,
+                                    timeout,
+                                    move || {
+                                        let _ = tx_timeout.send(Message::KillTimeout {
+                                            name: name_timeout.clone(),
+                                            pid,
+                                            timeout_secs: timeout,
+                                        });
+                                    },
+                                )
+                                .await;
+                                let _ = tx_kill.send(Message::KillOutcome {
+                                    outcome,
+                                    name,
+                                    pid,
+                                });
+                            });
+                        }
+                    } else {
+                        // UserConfirm -> dialog state; HardBlocked -> status
+                        update(
+                            app,
+                            Message::KillPrepared {
+                                snapshot,
+                                protection,
+                                name,
+                                pid,
+                            },
+                        );
+                    }
+                }
+                other => update(app, other),
             }
-            update(app, msg);
             app.needs_render = true;
         }
 
@@ -260,6 +494,21 @@ fn map_key_event(key: crossterm::event::KeyEvent, app: &App) -> Option<Message> 
         }
     }
 
+    // --- Confirm dialog dispatch (topmost overlay — UI-SPEC L2-confirm) ---
+    if app.confirm_pid.is_some() {
+        match key.code {
+            KeyCode::Char('y') | KeyCode::Enter => {
+                return Some(Message::KillConfirmed {
+                    pid: app.confirm_pid.unwrap_or(0),
+                });
+            }
+            KeyCode::Char('n') | KeyCode::Esc => return Some(Message::KillCancelled),
+            KeyCode::Char('x') => return None, // no-op: prevents re-triggering kill (UI-SPEC)
+            // Pass-through: all other keys keep working (UI-SPEC confirm table)
+            _ => {}
+        }
+    }
+
     // --- Tab switching (works in all modes) ---
     match key.code {
         KeyCode::Char('1') => return Some(Message::SwitchTab(0)),
@@ -291,6 +540,21 @@ fn map_key_event(key: crossterm::event::KeyEvent, app: &App) -> Option<Message> 
         KeyCode::Char('f') => {
             if !app.search_active && !app.filter_active {
                 Some(Message::FilterActivate)
+            } else {
+                None
+            }
+        }
+        KeyCode::Char('x') => {
+            // Kill owning process (D-01). No-op on empty list (PROC-01 edge
+            // truth: no selected row -> no kill, no dialog).
+            if app.confirm_pid.is_none() {
+                if let Some(conn) = app.display_data().get(app.selected_index) {
+                    Some(Message::Kill {
+                        pid: conn.process.pid,
+                    })
+                } else {
+                    None
+                }
             } else {
                 None
             }
@@ -412,6 +676,20 @@ fn render_app(f: &mut Frame, app: &App, theme: &Theme) {
                 ..content_area
             };
             FilterPanelComponent.render(app, f, filter_overlay, theme);
+        }
+
+        // Kill confirmation dialog — centered 60x7 popup, always topmost
+        // (UI-SPEC overlay stack: table -> search -> filter -> ... -> confirm)
+        if app.confirm_pid.is_some() {
+            let w = content_area.width;
+            let h = content_area.height;
+            let confirm_area = Rect {
+                x: content_area.x + (w.saturating_sub(60)) / 2,
+                y: content_area.y + (h.saturating_sub(7)) / 2,
+                width: 60.min(w),
+                height: 7.min(h),
+            };
+            KillConfirmComponent.render(app, f, confirm_area, theme);
         }
     } else {
         // Other tabs get full content area
@@ -560,6 +838,19 @@ fn render_status_bar(f: &mut Frame, area: Rect, app: &App, theme: &Theme) {
         ];
         let paragraph = Paragraph::new(Text::from(Line::from(spans))).style(base_style);
         f.render_widget(paragraph, area);
+    } else if let Some(ref ks) = app.kill_status {
+        // Kill outcome / progress (D-04) — 8 locked UI-SPEC strings
+        let tone_style = match ks.tone {
+            KillTone::InProgress => theme.fg_default,
+            KillTone::Success => theme.status_success,
+            KillTone::Error => theme.status_error,
+        };
+        let spans = vec![Span::styled(
+            ks.text.clone(),
+            Style::default().fg(tone_style).bg(theme.bg_surface),
+        )];
+        let paragraph = Paragraph::new(Text::from(Line::from(spans))).style(base_style);
+        f.render_widget(paragraph, area);
     } else {
         let now = chrono::Local::now().format("%H:%M:%S");
         let spans = vec![
@@ -636,8 +927,68 @@ fn render_footer(f: &mut Frame, area: Rect, app: &App, theme: &Theme) {
             .style(Style::default().bg(theme.bg_surface))
             .centered();
         f.render_widget(footer, area);
+    } else if app.confirm_pid.is_some() {
+        // Confirm dialog footer (UI-SPEC Footer table — locked string)
+        let kill_accent = Style::default()
+            .fg(theme.accent_secondary)
+            .add_modifier(Modifier::UNDERLINED);
+        let muted_underline = Style::default()
+            .fg(theme.fg_muted)
+            .add_modifier(Modifier::UNDERLINED);
+        let name = app
+            .confirm_name
+            .clone()
+            .unwrap_or_else(|| "process".to_string());
+        // {name} truncates with U+2026 to term_width - 63 (UI-SPEC footer table)
+        let name_budget = area.width.saturating_sub(63) as usize;
+        let display_name = truncate_footer_name(&name, name_budget);
+        let line = Line::from(vec![
+            Span::styled("[y]Confirm kill", kill_accent),
+            Span::styled(" ", muted),
+            Span::styled("[n]Cancel", muted_underline),
+            Span::styled(
+                format!(
+                    "  \u{2014}  {} is on your protection list",
+                    display_name
+                ),
+                muted,
+            ),
+        ]);
+        let footer = Paragraph::new(Text::from(line))
+            .style(Style::default().bg(theme.bg_surface))
+            .centered();
+        f.render_widget(footer, area);
+    } else if app.active_tab == 1 {
+        // Ports tab default footer — UI-SPEC locked string (73 cols):
+        // [jk]Move [/]Search [f]Filter [d]Detail [x]Kill [r]Refresh [q]Quit [?]Help
+        // [s]Sort and [a]Elevate dropped from the Ports footer (D-09; both stay
+        // bound and are documented in the Help overlay, plan 02-03).
+        let kill_accent = Style::default()
+            .fg(theme.accent_secondary)
+            .add_modifier(Modifier::UNDERLINED);
+        let line = Line::from(vec![
+            Span::styled("[jk]Move", accent),
+            Span::styled(" ", muted),
+            Span::styled("[/]Search", accent),
+            Span::styled(" ", muted),
+            Span::styled("[f]Filter", accent),
+            Span::styled(" ", muted),
+            Span::styled("[d]Detail", accent),
+            Span::styled(" ", muted),
+            Span::styled("[x]Kill", kill_accent),
+            Span::styled(" ", muted),
+            Span::styled("[r]Refresh", accent),
+            Span::styled(" ", muted),
+            Span::styled("[q]Quit", accent),
+            Span::styled(" ", muted),
+            Span::styled("[?]Help", accent),
+        ]);
+        let footer = Paragraph::new(Text::from(line))
+            .style(Style::default().bg(theme.bg_surface))
+            .centered();
+        f.render_widget(footer, area);
     } else {
-        // Default footer
+        // Other tabs keep the Phase 1 footer ([s]Sort + conditional [a]Elevate)
         let mut spans: Vec<Span> = vec![
             Span::styled("[\u{2191}\u{2193}jk]", accent),
             Span::styled("Navigate", muted),
@@ -672,5 +1023,16 @@ fn render_footer(f: &mut Frame, area: Rect, app: &App, theme: &Theme) {
             .style(Style::default().bg(theme.bg_surface))
             .centered();
         f.render_widget(footer, area);
+    }
+}
+
+/// Truncate a footer-embedded name to max_len chars, appending U+2026.
+/// Never wraps, never exceeds the declared budget (UI-SPEC truncation rule).
+fn truncate_footer_name(s: &str, max_len: usize) -> String {
+    if s.chars().count() > max_len {
+        let truncated: String = s.chars().take(max_len.saturating_sub(1)).collect();
+        format!("{}\u{2026}", truncated)
+    } else {
+        s.to_string()
     }
 }

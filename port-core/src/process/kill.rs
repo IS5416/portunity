@@ -222,8 +222,10 @@ fn terminate_and_wait(handle: HANDLE, pid: u32) -> KillOutcome {
                 )),
             },
             Err(e) => {
-                let raw = e.code().0 as u32;
-                if raw == 5 {
+                // windows-rs errors carry Win32 codes as HRESULT 0x8007XXXX —
+                // mask the low 16 bits to get ERROR_ACCESS_DENIED (5).
+                let win32_code = (e.code().0 as u32) & 0xFFFF;
+                if win32_code == 5 {
                     KillOutcome::AccessDenied
                 } else {
                     KillOutcome::Failed(format!("TerminateProcess({}) failed: {:?}", pid, e))
