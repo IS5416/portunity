@@ -392,11 +392,34 @@ fn run_event_loop(
                         // "already on your protection list" info string.
                         Message::WhitelistAdd { path } => {
                             if !app.kill_in_flight {
-                                let mut settings = app.whitelist_settings.clone();
                                 let tx_wl = tx.clone();
                                 tokio::task::spawn_blocking(move || {
                                     match port_core::process::validate_user_entry(&path) {
                                         Ok(normalized) => {
+                                            // WR-04: re-read settings FRESH in the
+                                            // blocking closure and merge onto that
+                                            // copy — never save a stale working
+                                            // copy. Concurrent add/delete saves can
+                                            // no longer clobber each other (last
+                                            // writer always started from the latest
+                                            // on-disk state).
+                                            let mut settings =
+                                                match port_core::config::load_settings()
+                                                {
+                                                    Ok(s) => s,
+                                                    Err(e) => {
+                                                        let _ = tx_wl.send(
+                                                            Message::WhitelistError {
+                                                                path,
+                                                                reason: format!(
+                                                                    "could not load settings: {}",
+                                                                    e
+                                                                ),
+                                                            },
+                                                        );
+                                                        return;
+                                                    }
+                                                };
                                             let is_dup = settings
                                                 .whitelist
                                                 .iter()
@@ -468,9 +491,40 @@ fn run_event_loop(
                                             .len()
                                             .saturating_sub(1);
                                     }
-                                    let settings = app.whitelist_settings.clone();
                                     let tx_wl = tx.clone();
                                     tokio::task::spawn_blocking(move || {
+                                        // WR-04: re-read settings FRESH and remove
+                                        // by path (case-insensitive) — never save a
+                                        // stale working copy. A concurrent add's
+                                        // entry survives this save because the fresh
+                                        // copy already contains it; an index-based
+                                        // removal against a stale clone would drop
+                                        // it.
+                                        let mut settings =
+                                            match port_core::config::load_settings() {
+                                                Ok(s) => s,
+                                                Err(e) => {
+                                                    let _ = tx_wl.send(
+                                                        Message::WhitelistError {
+                                                            path: removed.clone(),
+                                                            reason: format!(
+                                                                "could not load settings: {}",
+                                                                e
+                                                            ),
+                                                        },
+                                                    );
+                                                    return;
+                                                }
+                                            };
+                                        if let Some(pos) = settings
+                                            .whitelist
+                                            .iter()
+                                            .position(|e| {
+                                                e.eq_ignore_ascii_case(&removed)
+                                            })
+                                        {
+                                            settings.whitelist.remove(pos);
+                                        }
                                         match port_core::config::save_settings(&settings) {
                                             Ok(()) => {
                                                 let _ = tx_wl.send(
