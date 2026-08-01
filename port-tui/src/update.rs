@@ -747,3 +747,63 @@ fn state_order(s: port_core::models::PortState) -> u8 {
         port_core::models::PortState::Unknown => 10,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// All whitelist status strings fit the 80-col gate with any path length
+    /// (A9 truncation keeps the path tail with U+2026).
+    #[test]
+    fn whitelist_status_strings_fit_80_cols() {
+        let long_path = format!(
+            "C:\\very\\long\\directory\\path\\that\\would\\overflow\\{}",
+            "a".repeat(100)
+        );
+        let cases = [
+            whitelist_added_string(&long_path, 80),
+            whitelist_removed_string(&long_path, 80),
+            whitelist_duplicate_string(&long_path, 80),
+            whitelist_error_string(&long_path, "Path does not exist", 80),
+            whitelist_error_string(&long_path, "could not save settings: disk full", 80),
+        ];
+        for s in cases {
+            assert!(
+                s.chars().count() <= 80,
+                "'{}' is {} chars — must fit 80",
+                s,
+                s.chars().count()
+            );
+        }
+    }
+
+    #[test]
+    fn whitelist_strings_keep_path_tail() {
+        let long_path = format!(
+            "C:\\very\\long\\directory\\path\\that\\would\\overflow\\{}",
+            "a".repeat(100)
+        );
+        let s = whitelist_added_string(&long_path, 80);
+        // The actionable tail (the file name region) survives with U+2026.
+        assert!(s.contains('\u{2026}'));
+        assert!(s.ends_with("— kills now require confirmation"));
+        assert!(s.starts_with("Added "));
+    }
+
+    #[test]
+    fn whitelist_strings_short_paths_unchanged() {
+        let path = "C:\\apps\\node.exe";
+        assert_eq!(
+            whitelist_added_string(path, 80),
+            "Added C:\\apps\\node.exe — kills now require confirmation"
+        );
+        assert_eq!(
+            whitelist_removed_string(path, 80),
+            "Removed C:\\apps\\node.exe — kills are instant again"
+        );
+        assert_eq!(
+            whitelist_duplicate_string(path, 80),
+            "C:\\apps\\node.exe is already on your protection list"
+        );
+    }
+}
