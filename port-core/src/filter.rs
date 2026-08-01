@@ -215,6 +215,31 @@ mod tests {
     }
 
     #[test]
+    fn or_within_vec_and_across_dimensions() {
+        // SRCH-02 combination documented explicitly: OR applies WITHIN a
+        // Vec dimension (protocols matches Tcp OR Udp), AND applies ACROSS
+        // dimensions (must also match the process-name dimension).
+        let conns = vec![
+            make_conn(80, "nginx.exe", 1, Protocol::Tcp, PortState::Listen),
+            make_conn(53, "dns.exe", 2, Protocol::Udp, PortState::Unknown),
+            make_conn(443, "dns.exe", 3, Protocol::Tcp, PortState::Listen),
+        ];
+        let filter = Filter {
+            // OR within: either protocol qualifies
+            protocols: vec![Protocol::Tcp, Protocol::Udp],
+            // AND across: the name dimension must also match
+            process_names: vec!["dns".to_string()],
+            ..Default::default()
+        };
+        let result = apply_filters(&conns, &filter);
+        // dns.exe on UDP 53 (Udp arm of the OR) AND dns.exe on TCP 443
+        // (Tcp arm of the OR); nginx.exe fails the name AND.
+        assert_eq!(result.len(), 2);
+        assert!(result.iter().any(|c| c.port.number == 53));
+        assert!(result.iter().any(|c| c.port.number == 443));
+    }
+
+    #[test]
     fn fuzzy_search_matches_multiple_fields() {
         let conns = vec![
             make_conn(8080, "nginx.exe", 1234, Protocol::Tcp, PortState::Listen),
