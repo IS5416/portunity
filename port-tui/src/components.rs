@@ -16,6 +16,7 @@ pub mod firewall;
 pub mod kill_confirm;
 pub mod detail_panel;
 pub mod whitelist_overlay;
+pub mod help;
 
 pub use ports::PortsComponent;
 pub use search::SearchComponent;
@@ -27,6 +28,7 @@ pub use firewall::FirewallTabComponent;
 pub use kill_confirm::KillConfirmComponent;
 pub use detail_panel::DetailPanelComponent;
 pub use whitelist_overlay::WhitelistOverlayComponent;
+pub use help::HelpComponent;
 
 /// Trait for renderable TUI components.
 ///

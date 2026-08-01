@@ -33,8 +33,8 @@ use ratatui::{Frame, Terminal};
 use app::{App, KillTone, WhitelistFocus};
 use components::{
     Component, DetailPanelComponent, FilterPanelComponent, FirewallTabComponent,
-    HistoryTabComponent, KillConfirmComponent, OverviewComponent, PortsComponent,
-    SearchComponent, TrafficTabComponent, WhitelistOverlayComponent,
+    HelpComponent, HistoryTabComponent, KillConfirmComponent, OverviewComponent,
+    PortsComponent, SearchComponent, TrafficTabComponent, WhitelistOverlayComponent,
 };
 use message::Message;
 use theme::Theme;
@@ -749,6 +749,18 @@ fn map_key_event(key: crossterm::event::KeyEvent, app: &App) -> Option<Message> 
         }
     }
 
+    // --- Help overlay dispatch ('?') — universal full-area reference
+    // overlay. Esc and '?' close it; everything else is swallowed (the
+    // overlay covers the whole content area — no hidden table interaction,
+    // and the confirm dialog keeps its topmost keys since its dispatch runs
+    // earlier). ---
+    if app.help_active {
+        match key.code {
+            KeyCode::Esc | KeyCode::Char('?') => return Some(Message::ToggleHelp),
+            _ => return None,
+        }
+    }
+
     // --- Whitelist overlay dispatch (D-14) — UI-SPEC whitelist pass-through
     // table: j/k/↑/↓ (user-list focus), d (delete selected entry),
     // Tab/Shift+Tab (focus user-list ↔ input), printable chars + Backspace +
@@ -1012,6 +1024,13 @@ fn render_app(f: &mut Frame, app: &App, theme: &Theme) {
             ..content_area
         };
         WhitelistOverlayComponent.render(app, f, wl_area, theme);
+    }
+
+    // Help overlay ('?') — full content area, renders above the whitelist
+    // overlay and below the confirm dialog (UI-SPEC stack order; the
+    // canonical reference for the footer-dropped s/w keys).
+    if app.help_active {
+        HelpComponent.render(app, f, content_area, theme);
     }
 
     // Kill confirmation dialog — centered 60x7 popup, always topmost
