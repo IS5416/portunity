@@ -52,13 +52,14 @@ pub struct WindowsProcessManager;
 impl ProcessManager for WindowsProcessManager {
     async fn details(
         &self,
-        _snapshot: &ProcessSnapshot,
+        snapshot: &ProcessSnapshot,
     ) -> crate::Result<crate::models::ProcessInfo> {
-        // info.rs lands in plan 02-02; for now return a minimal success stub.
-        // The trait reshape is the goal of this plan — no details() runtime call exists yet.
-        Err(crate::Error::Platform(
-            "Process details not yet implemented (plan 02-02)".into(),
-        ))
+        // Full detail fetch (plan 02-02): one spawn_blocking scope in
+        // info.rs — path, command line, start time, parent PID, protection
+        // markers. The snapshot's creation-time identity is NOT reused here:
+        // the panel never caches the FILETIME (D-08) — the kill re-captures
+        // it fresh via snapshot_for(pid) at kill time.
+        info::fetch_details(snapshot.pid).await
     }
 
     async fn terminate(&self, snapshot: &ProcessSnapshot, timeout_secs: u64) -> KillOutcome {
