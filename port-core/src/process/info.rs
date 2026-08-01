@@ -56,8 +56,8 @@ const PROCESS_COMMAND_LINE_INFORMATION: u32 = 60;
 /// TRUST_E_NOSIGNATURE — the file has no signature.
 const TRUST_E_NOSIGNATURE: u32 = 0x800B_0100;
 
-/// Manual FFI to ntdll — NtQueryInformationProcess is not in the windows
-/// crate (RESEARCH Code Example 3; T-02-SC: linked from the OS, not a crate).
+// Manual FFI to ntdll — NtQueryInformationProcess is not in the windows
+// crate (RESEARCH Code Example 3; T-02-SC: linked from the OS, not a crate).
 #[link(name = "ntdll")]
 unsafe extern "system" {
     fn NtQueryInformationProcess(
