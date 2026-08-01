@@ -193,8 +193,26 @@ impl Component for PortsComponent {
 
                 let (symbol, label, color) = state_display(conn.port.state, theme);
 
-                // Determine process name style: dim system processes when non-admin (SCAN-07, D-09)
-                let system_dim = !app.is_admin && is_system_process(&conn.process.name, conn.process.pid);
+                // Protection markers (UI-SPEC Protection Semantics):
+                // - ◆ in status.error for built-in whitelist membership
+                // - ◆ in status.warning for user-whitelist membership
+                // - dimming driven by whitelist membership, non-admin only
+                //   (Phase 1 PID<1000/known-name heuristic superseded)
+                let marker = if conn.process.is_system_critical {
+                    Some((theme.status_error, 2u16))
+                } else if conn.process.user_protected {
+                    Some((theme.status_warning, 2u16))
+                } else {
+                    None
+                };
+                let protected = marker.is_some();
+                let system_dim = !app.is_admin && protected;
+                // UI-SPEC Typography: strikethrough (SGR 9) on the process
+                // name when the row's process was just killed (pending scan
+                // removal — last_killed_pid cleared on ScanComplete).
+                let killed = Some(conn.process.pid) == app.last_killed_pid;
+                let name_budget =
+                    (COL_PROCESS.saturating_sub(1)).saturating_sub(marker.map(|m| m.1).unwrap_or(0)) as usize;
 
                 // Selected row: reverse video overrides per-cell color
                 if is_selected {
@@ -202,11 +220,26 @@ impl Component for PortsComponent {
                         .fg(theme.fg_default)
                         .bg(theme.bg_selection)
                         .add_modifier(Modifier::REVERSED);
-                    let proc_style = if system_dim {
-                        rev_style.add_modifier(Modifier::DIM)
-                    } else {
-                        rev_style
-                    };
+                    let mut proc_mods = Modifier::REVERSED;
+                    if system_dim {
+                        proc_mods |= Modifier::DIM;
+                    }
+                    if killed {
+                        proc_mods |= Modifier::CROSSED_OUT;
+                    }
+                    let proc_style = rev_style.add_modifier(proc_mods);
+
+                    let mut process_cell_spans: Vec<Span> = Vec::new();
+                    if let Some((mcolor, _)) = marker {
+                        process_cell_spans.push(Span::styled(
+                            "\u{25c6} ",
+                            Style::default().fg(mcolor).bg(theme.bg_selection),
+                        ));
+                    }
+                    process_cell_spans.push(Span::styled(
+                        truncate(&conn.process.name, name_budget),
+                        proc_style,
+                    ));
 
                     Row::new(vec![
                         Cell::from(Text::styled(
@@ -221,10 +254,7 @@ impl Component for PortsComponent {
                             protocol_label(conn.port.protocol),
                             rev_style,
                         )),
-                        Cell::from(Text::styled(
-                            truncate(&conn.process.name, (COL_PROCESS - 1) as usize),
-                            proc_style,
-                        )),
+                        Cell::from(Text::from(Line::from(process_cell_spans))),
                         Cell::from(Text::styled(
                             conn.process.pid.to_string(),
                             rev_style,
@@ -235,11 +265,26 @@ impl Component for PortsComponent {
                     let symbol_style = Style::default().fg(color).bg(bg);
                     let label_style = Style::default().fg(color).bg(bg);
                     let text_style = Style::default().fg(theme.fg_default).bg(bg);
-                    let proc_style = if system_dim {
-                        text_style.add_modifier(Modifier::DIM)
-                    } else {
-                        text_style
-                    };
+                    let mut proc_mods = Modifier::empty();
+                    if system_dim {
+                        proc_mods |= Modifier::DIM;
+                    }
+                    if killed {
+                        proc_mods |= Modifier::CROSSED_OUT;
+                    }
+                    let proc_style = text_style.add_modifier(proc_mods);
+
+                    let mut process_cell_spans: Vec<Span> = Vec::new();
+                    if let Some((mcolor, _)) = marker {
+                        process_cell_spans.push(Span::styled(
+                            "\u{25c6} ",
+                            Style::default().fg(mcolor).bg(bg),
+                        ));
+                    }
+                    process_cell_spans.push(Span::styled(
+                        truncate(&conn.process.name, name_budget),
+                        proc_style,
+                    ));
 
                     Row::new(vec![
                         Cell::from(Text::from(Line::from(vec![
@@ -255,10 +300,7 @@ impl Component for PortsComponent {
                             protocol_label(conn.port.protocol),
                             text_style,
                         )),
-                        Cell::from(Text::styled(
-                            truncate(&conn.process.name, (COL_PROCESS - 1) as usize),
-                            proc_style,
-                        )),
+                        Cell::from(Text::from(Line::from(process_cell_spans))),
                         Cell::from(Text::styled(
                             conn.process.pid.to_string(),
                             text_style,
@@ -356,29 +398,6 @@ fn protocol_label(p: port_core::models::Protocol) -> &'static str {
         port_core::models::Protocol::Tcp6 => "TCP6",
         port_core::models::Protocol::Udp6 => "UDP6",
     }
-}
-
-/// Known system-owned process names for dimming when non-admin.
-/// This is a simple heuristic (PID < 1000 OR name in this set), NOT the full
-/// whitelist (Phase 2). It provides enough signal for non-admin grace period.
-const SYSTEM_NAMES: &[&str] = &[
-    "svchost.exe",
-    "services.exe",
-    "lsass.exe",
-    "winlogon.exe",
-    "csrss.exe",
-    "smss.exe",
-    "wininit.exe",
-    "System",
-    "System Idle Process",
-    "Registry",
-    "spoolsv.exe",
-    "winlogon.exe",
-];
-
-/// Check whether a process is likely system-owned and needs admin for full details.
-fn is_system_process(name: &str, pid: u32) -> bool {
-    pid < 1000 || SYSTEM_NAMES.iter().any(|s| name.eq_ignore_ascii_case(s))
 }
 
 /// Truncate a string to max_len, appending "…" if truncated.

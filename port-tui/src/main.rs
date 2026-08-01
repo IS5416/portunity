@@ -32,9 +32,9 @@ use ratatui::{Frame, Terminal};
 
 use app::{App, KillTone};
 use components::{
-    Component, FilterPanelComponent, FirewallTabComponent, HistoryTabComponent,
-    KillConfirmComponent, OverviewComponent, PortsComponent, SearchComponent,
-    TrafficTabComponent,
+    Component, DetailPanelComponent, FilterPanelComponent, FirewallTabComponent,
+    HistoryTabComponent, KillConfirmComponent, OverviewComponent, PortsComponent,
+    SearchComponent, TrafficTabComponent,
 };
 use message::Message;
 use theme::Theme;
@@ -124,6 +124,35 @@ fn spawn_scan(tx: tokio::sync::mpsc::UnboundedSender<Message>) {
                 let _ = tx.send(Message::ScanError(e.to_string()));
             }
         }
+    });
+}
+
+/// Spawn the on-demand detail fetch (D-08) — `fetch_details` runs its own
+/// spawn_blocking scope in port-core; the result flows back via
+/// `DetailDataLoaded` through the mpsc channel. The row's scan-time
+/// ProcessInfo is the fallback: on fetch failure the panel keeps name/PID
+/// and the protection markers with every other field at "—" (UI-SPEC
+/// Detail Panel error state).
+fn spawn_detail_fetch(tx: tokio::sync::mpsc::UnboundedSender<Message>, row: port_core::models::ProcessInfo) {
+    let pid = row.pid;
+    let fallback_name = row.name.clone();
+    tokio::spawn(async move {
+        let process_info = match port_core::process::fetch_details(pid).await {
+            Ok(mut info) => {
+                if info.name.is_empty() {
+                    info.name = fallback_name;
+                }
+                info
+            }
+            Err(_) => port_core::models::ProcessInfo {
+                executable_path: None,
+                command_line: None,
+                start_time: None,
+                is_signed: None,
+                ..row
+            },
+        };
+        let _ = tx.send(Message::DetailDataLoaded { process_info });
     });
 }
 
@@ -345,6 +374,51 @@ fn run_event_loop(
                                 });
                             }
                         }
+                        // Intercept ToggleDetailPanel: on OPEN, capture the
+                        // selected row as the panel's PID and fire the on-demand
+                        // detail fetch (D-08) off the async runtime. On fetch
+                        // failure the panel keeps name/PID from the row with
+                        // every other field at "—" (UI-SPEC error state: close
+                        // and re-open to retry).
+                        Message::ToggleDetailPanel => {
+                            let opening = !app.detail_active;
+                            if opening && !app.detail_loading {
+                                let row = app.selected_connection().map(|c| c.process.clone());
+                                match row {
+                                    Some(row) => {
+                                        app.detail_pid = Some(row.pid);
+                                        app.detail_loading = true;
+                                        app.detail_exited = false;
+                                        app.detail_data = None;
+                                        spawn_detail_fetch(tx.clone(), row);
+                                    }
+                                    None => {
+                                        app.detail_pid = None;
+                                    }
+                                }
+                            }
+                            update(app, Message::ToggleDetailPanel);
+                            app.needs_render = true;
+                        }
+                        // Intercept selection movement while the panel is open:
+                        // selection change refreshes the panel content (D-06).
+                        Message::MoveUp | Message::MoveDown | Message::ScrollTop
+                        | Message::ScrollBottom => {
+                            update(app, m);
+                            if app.detail_active && !app.detail_loading {
+                                let row = app.selected_connection().map(|c| c.process.clone());
+                                if let Some(row) = row {
+                                    if app.detail_pid != Some(row.pid) {
+                                        app.detail_pid = Some(row.pid);
+                                        app.detail_loading = true;
+                                        app.detail_exited = false;
+                                        app.detail_data = None;
+                                        spawn_detail_fetch(tx.clone(), row);
+                                    }
+                                }
+                            }
+                            app.needs_render = true;
+                        }
                         other => {
                             update(app, other);
                             app.needs_render = true;
@@ -357,9 +431,50 @@ fn run_event_loop(
         // Drain async channel (D-12: try_recv on each tick)
         while let Ok(msg) = rx.try_recv() {
             match msg {
-                Message::ScanComplete(_) => {
+                Message::ScanComplete(conns) => {
                     *scan_spawned = false;
-                    update(app, msg);
+                    // D-07: invalidate the signature cache on every scan —
+                    // no stale signature is ever displayed (T-02-07).
+                    app.signature_cache.clear();
+                    // ProcessExited detection: the shown process left the
+                    // scan list — render strikethrough + "Exited".
+                    if app.detail_active {
+                        if let Some(dpid) = app.detail_pid {
+                            if !conns.iter().any(|c| c.process.pid == dpid) {
+                                update(app, Message::ProcessExited { pid: dpid });
+                            }
+                        }
+                    }
+                    update(app, Message::ScanComplete(conns));
+                }
+                // DetailDataLoaded drain special-case: store the data, then
+                // fire the on-demand signature verification (D-07) when the
+                // per-PID cache misses — update() cannot spawn. On cache hit
+                // the panel renders the cached verdict immediately.
+                Message::DetailDataLoaded { process_info } => {
+                    if Some(process_info.pid) == app.detail_pid {
+                        let pid = process_info.pid;
+                        let path = process_info.executable_path.clone();
+                        update(app, Message::DetailDataLoaded { process_info });
+                        if let Some(path) = path {
+                            if !app.signature_cache.contains_key(&pid) {
+                                let tx_sig = tx.clone();
+                                tokio::spawn(async move {
+                                    let is_signed =
+                                        port_core::process::verify_signature(&path).await;
+                                    let _ = tx_sig.send(Message::SignatureVerified {
+                                        pid,
+                                        is_signed,
+                                    });
+                                });
+                            }
+                        } else {
+                            // No path — no signature possible; render Unknown
+                            // (never leave the row stuck on "Verifying…").
+                            app.signature_cache.insert(pid, None);
+                        }
+                    }
+                    // Stale result (selection moved on) — dropped.
                 }
                 Message::KillPrepared {
                     snapshot,
@@ -509,6 +624,17 @@ fn map_key_event(key: crossterm::event::KeyEvent, app: &App) -> Option<Message> 
         }
     }
 
+    // --- Detail panel dispatch (D-06) — d/Esc close only; everything else
+    // (j/k/up/down/r/s/g/G//f/x) passes through to the table (UI-SPEC
+    // detail pass-through table). Placed AFTER the confirm dialog so the
+    // topmost overlay keeps Esc semantics. ---
+    if app.detail_active {
+        match key.code {
+            KeyCode::Char('d') | KeyCode::Esc => return Some(Message::ToggleDetailPanel),
+            _ => {}
+        }
+    }
+
     // --- Tab switching (works in all modes) ---
     match key.code {
         KeyCode::Char('1') => return Some(Message::SwitchTab(0)),
@@ -526,6 +652,15 @@ fn map_key_event(key: crossterm::event::KeyEvent, app: &App) -> Option<Message> 
         KeyCode::Char('q') => Some(Message::Quit),
         KeyCode::Char('r') => Some(Message::Refresh),
         KeyCode::Char('s') => Some(Message::Sort(app.sort_column)),
+        KeyCode::Char('d') => {
+            // Detail panel toggle (D-06) — Ports tab only (UI-SPEC).
+            // When the panel is open 'd' is already intercepted above.
+            if app.active_tab == 1 {
+                Some(Message::ToggleDetailPanel)
+            } else {
+                None
+            }
+        }
         KeyCode::Char('j') | KeyCode::Down => Some(Message::MoveDown),
         KeyCode::Char('k') | KeyCode::Up => Some(Message::MoveUp),
         KeyCode::Char('g') => Some(Message::ScrollTop),
@@ -676,6 +811,18 @@ fn render_app(f: &mut Frame, app: &App, theme: &Theme) {
                 ..content_area
             };
             FilterPanelComponent.render(app, f, filter_overlay, theme);
+        }
+
+        // Detail panel — 12-row top-anchored Clear-over (D-05: the table is
+        // never squeezed; >=9 table rows stay visible at 80x24). Stack order
+        // per UI-SPEC: table -> search -> filter -> detail -> (whitelist,
+        // plan 02-03) -> confirm.
+        if app.detail_active {
+            let detail_area = Rect {
+                height: 12,
+                ..content_area
+            };
+            DetailPanelComponent.render(app, f, detail_area, theme);
         }
 
         // Kill confirmation dialog — centered 60x7 popup, always topmost
@@ -953,6 +1100,35 @@ fn render_footer(f: &mut Frame, area: Rect, app: &App, theme: &Theme) {
                 ),
                 muted,
             ),
+        ]);
+        let footer = Paragraph::new(Text::from(line))
+            .style(Style::default().bg(theme.bg_surface))
+            .centered();
+        f.render_widget(footer, area);
+    } else if app.detail_active {
+        // Detail panel footer (UI-SPEC Footer table — locked string):
+        // "[Esc]Close [j/k]Next port [x]Kill [r]Refresh  —  detail for {name}"
+        // Fixed prefix 66 cols (UI-SPEC budget); {name} truncates with U+2026
+        // to term_width - 66 — never wraps, never exceeds term_width.
+        let kill_accent = Style::default()
+            .fg(theme.accent_secondary)
+            .add_modifier(Modifier::UNDERLINED);
+        let name = app
+            .selected_connection()
+            .map(|c| c.process.name.clone())
+            .unwrap_or_default();
+        let name_budget = area.width.saturating_sub(66) as usize;
+        let display_name = truncate_footer_name(&name, name_budget);
+        let line = Line::from(vec![
+            Span::styled("[Esc]Close", accent),
+            Span::styled(" ", muted),
+            Span::styled("[j/k]Next port", accent),
+            Span::styled(" ", muted),
+            Span::styled("[x]Kill", kill_accent),
+            Span::styled(" ", muted),
+            Span::styled("[r]Refresh", accent),
+            Span::styled("  \u{2014}  detail for ", muted),
+            Span::styled(display_name, muted),
         ]);
         let footer = Paragraph::new(Text::from(line))
             .style(Style::default().bg(theme.bg_surface))

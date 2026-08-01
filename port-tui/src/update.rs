@@ -295,6 +295,49 @@ pub fn update(app: &mut App, msg: Message) {
         Message::KillExecute { .. } => {
             // Handled by the main event loop (intercept-owned).
         }
+        // --- Detail panel handlers (D-05..D-08, PROC-06) ---
+
+        Message::ToggleDetailPanel => {
+            // Toggle the panel. The fetch fires from the event-loop intercept
+            // (spawn_blocking) — this handler only mutates state. Opening
+            // records the selected row as the panel's PID; closing clears the
+            // transient loading flag.
+            app.detail_active = !app.detail_active;
+            if app.detail_active {
+                // detail_pid is set by the intercept before update() runs;
+                // fall back to the selected row if no intercept ran.
+                if app.detail_pid.is_none() {
+                    app.detail_pid = app.selected_connection().map(|c| c.process.pid);
+                }
+            } else {
+                app.detail_loading = false;
+            }
+        }
+        Message::DetailDataLoaded { process_info } => {
+            // Store the fetched detail data (the drain-loop special case
+            // spawns the signature verification when the cache misses).
+            app.detail_data = Some(process_info);
+            app.detail_loading = false;
+        }
+        Message::SignatureVerified { pid, is_signed } => {
+            // D-07 cache: store the verdict and, when it belongs to the
+            // shown row, refresh the panel copy immediately.
+            app.signature_cache.insert(pid, is_signed);
+            if app.detail_pid == Some(pid) {
+                if let Some(ref mut info) = app.detail_data {
+                    if info.pid == pid {
+                        info.is_signed = is_signed;
+                    }
+                }
+            }
+        }
+        Message::ProcessExited { pid } => {
+            // The shown process left the scan list — strikethrough + "Exited".
+            if app.detail_pid == Some(pid) {
+                app.detail_exited = true;
+            }
+        }
+
         Message::KillOutcome {
             outcome,
             name,

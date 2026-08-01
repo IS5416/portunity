@@ -6,7 +6,7 @@
 use std::collections::HashMap;
 use std::time::Instant;
 
-use port_core::models::{Connection, Filter};
+use port_core::models::{Connection, Filter, ProcessInfo};
 use port_core::process::{KillOutcome, ProcessSnapshot};
 
 use crate::message::{FilterField, SortColumn, SortOrder};
@@ -143,6 +143,31 @@ pub struct App {
 
     /// Current terminal width — truncation budget for status/footer strings.
     pub term_width: u16,
+
+    // --- Detail panel state (D-05..D-08, PROC-06) ---
+
+    /// Whether the detail panel overlay is open (D-06).
+    pub detail_active: bool,
+
+    /// PID of the row the panel currently shows; selection change refreshes
+    /// (D-06). `None` = no selection when the panel is open.
+    pub detail_pid: Option<u32>,
+
+    /// Fetched detail data (D-08). `None` while loading or before the first
+    /// successful fetch for the current selection.
+    pub detail_data: Option<ProcessInfo>,
+
+    /// Whether a detail fetch is in flight (guards double-fetch on toggle).
+    pub detail_loading: bool,
+
+    /// Whether the shown process was detected as exited on the last scan
+    /// (UI-SPEC: name strikethrough + Status "Exited").
+    pub detail_exited: bool,
+
+    /// Per-PID signature verdict cache (D-07). Populated on SignatureVerified,
+    /// cleared on every ScanComplete (in the drain loop) — no stale signature
+    /// is ever displayed (T-02-07).
+    pub signature_cache: HashMap<u32, Option<bool>>,
 }
 
 impl App {
@@ -184,6 +209,12 @@ impl App {
             last_killed_pid: None,
             kill_timeout_secs: 5,
             term_width: 80,
+            detail_active: false,
+            detail_pid: None,
+            detail_data: None,
+            detail_loading: false,
+            detail_exited: false,
+            signature_cache: HashMap::new(),
         }
     }
 
@@ -197,6 +228,12 @@ impl App {
         } else {
             &self.ports
         }
+    }
+
+    /// Return the currently selected connection (the detail panel's data
+    /// source for port/protocol/name — D-06).
+    pub fn selected_connection(&self) -> Option<&Connection> {
+        self.display_data().get(self.selected_index)
     }
 }
 

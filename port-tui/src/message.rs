@@ -4,7 +4,7 @@
 //! The main loop maps crossterm events to Messages and the `update()` function
 //! transforms application state.
 
-use port_core::models::Connection;
+use port_core::models::{Connection, ProcessInfo};
 use port_core::process::{KillOutcome, ProcessSnapshot, Protection};
 
 /// Sortable columns in the port table.
@@ -212,4 +212,28 @@ pub enum Message {
         name: String,
         pid: u32,
     },
+
+    // --- Detail panel messages (D-05..D-08, PROC-06) ---
+    //
+    // The panel stores display data only — the kill path re-captures the
+    // identity FRESH via snapshot_for(pid) at kill time (plan 02-01 Task 2),
+    // so no creation-time FILETIME rides along here.
+
+    /// User pressed 'd' — toggle the detail panel overlay (D-06).
+    ToggleDetailPanel,
+
+    /// Detail fetch completed — panel displays the process info (D-08).
+    /// On fetch failure the intercept sends this with name/PID from the row
+    /// and every other field None (renders "—" per UI-SPEC error state).
+    DetailDataLoaded { process_info: ProcessInfo },
+
+    /// Signature verification completed for a PID (D-07 on-demand + cache).
+    SignatureVerified {
+        pid: u32,
+        is_signed: Option<bool>,
+    },
+
+    /// The process the panel is showing left the scan list — render the
+    /// name strikethrough and Status "Exited" (UI-SPEC Detail Panel States).
+    ProcessExited { pid: u32 },
 }
