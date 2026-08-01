@@ -515,15 +515,19 @@ mod tests {
     }
 
     /// Build a MIB_TCP6ROW_OWNER_PID row for tests.
+    ///
+    /// Ports are stored network-order by the OS: `ntohs(dwPort as u16)`
+    /// must recover the logical port, so the test writes the byte-swapped
+    /// u16 (`port.to_be()`) widened to u32.
     #[cfg(target_os = "windows")]
-    fn tcp6_row(remote_port_raw: u32, remote_addr: [u8; 16], dw_state: u32) -> MIB_TCP6ROW_OWNER_PID {
+    fn tcp6_row(remote_port: u16, remote_addr: [u8; 16], dw_state: u32) -> MIB_TCP6ROW_OWNER_PID {
         MIB_TCP6ROW_OWNER_PID {
             ucLocalAddr: [0; 16],
             dwLocalScopeId: 0,
-            dwLocalPort: 80u32.to_be(),
+            dwLocalPort: u32::from(80u16.to_be()),
             ucRemoteAddr: remote_addr,
             dwRemoteScopeId: 0,
-            dwRemotePort: remote_port_raw,
+            dwRemotePort: u32::from(remote_port.to_be()),
             dwState: dw_state,
             dwOwningPid: 1234,
         }
@@ -534,7 +538,7 @@ mod tests {
     fn tcp6_remote_address_populated_when_port_set() {
         // Regression for WR-06: TCP6 rows must show the remote address
         // (previously hardcoded None)...
-        let row = tcp6_row(443u32.to_be(), ipv6([0, 0, 0, 0, 0, 0, 0, 1]), 5);
+        let row = tcp6_row(443, ipv6([0, 0, 0, 0, 0, 0, 0, 1]), 5);
         let conn = connection_from_tcp6_row(&row, "test.exe");
         assert_eq!(conn.remote_address.as_deref(), Some("::1"));
         assert_eq!(conn.remote_port, Some(443));
