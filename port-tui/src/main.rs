@@ -159,7 +159,8 @@ fn spawn_detail_fetch(tx: tokio::sync::mpsc::UnboundedSender<Message>, row: port
 /// Deliver Ctrl+C to a console process (helper mode, `--ctrl-c <pid>`).
 ///
 /// Exit-code contract (documented in `port-core/src/process/kill.rs`):
-/// `0` = delivered, `1` = no console. The helper ignores CTRL_C in itself,
+/// `0` = delivered, `1` = no console, `2` = delivery failed. The helper
+/// ignores CTRL_C in itself,
 /// detaches from its own hidden console, attaches to the target's console,
 /// and broadcasts CTRL_C_EVENT to all processes on that console (group 0).
 /// The helper cannot terminate anything — it only generates a console event.
@@ -182,8 +183,15 @@ fn helper_send_ctrl_c(pid: u32) -> i32 {
 
         match AttachConsole(pid) {
             Ok(()) => {
-                let _ = GenerateConsoleCtrlEvent(CTRL_C_EVENT, 0);
-                0 // delivered
+                // WR-05: report the event result truthfully — a failed
+                // GenerateConsoleCtrlEvent must NOT claim "delivered"
+                // (the pipeline would wait the full graceful timeout for
+                // a signal that was never sent).
+                if GenerateConsoleCtrlEvent(CTRL_C_EVENT, 0).is_ok() {
+                    0 // delivered
+                } else {
+                    2 // event delivery failed
+                }
             }
             Err(_) => 1, // no console
         }
