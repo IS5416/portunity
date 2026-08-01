@@ -45,9 +45,9 @@ pub struct ProcessSnapshot {
 /// Internal handle wrapper — RAII close via `Drop`.
 ///
 /// Never stored outside a `spawn_blocking` scope. Never crosses a channel.
-/// Public for integration testing but fields are crate-private.
+/// Public for integration testing; the handle itself stays crate-private.
+/// Identity (PID + creation time) lives in `ProcessSnapshot`, never here.
 pub struct OpenProcessHandle {
-    pub(crate) pid: u32,
     pub(crate) handle: HANDLE,
 }
 
@@ -75,7 +75,7 @@ fn open_with(pid: u32, rights: PROCESS_ACCESS_RIGHTS) -> crate::Result<OpenProce
             }
         })?;
 
-        Ok(OpenProcessHandle { pid, handle })
+        Ok(OpenProcessHandle { handle })
     }
 }
 
