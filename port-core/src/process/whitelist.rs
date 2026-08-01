@@ -373,4 +373,150 @@ mod tests {
         let result = protection_status(99999, "not_in_builtin.exe", None, &settings);
         assert_eq!(result, Protection::None);
     }
+
+    // ── validate_user_entry / normalize_user_entry (plan 02-03, PROC-05) ──
+
+    #[test]
+    fn validate_accepts_existing_absolute_path() {
+        // The test binary itself is a real existing absolute path.
+        let exe = std::env::current_exe().unwrap();
+        let path = exe.to_string_lossy().to_string();
+        let result = validate_user_entry(&path);
+        assert!(result.is_ok(), "existing path must validate, got: {:?}", result);
+    }
+
+    #[test]
+    fn validate_rejects_nonexistent_path() {
+        let result = validate_user_entry(r"C:\missing\thing.exe");
+        assert_eq!(result, Err("Path does not exist".to_string()));
+    }
+
+    #[test]
+    fn validate_rejects_relative_path() {
+        let result = validate_user_entry("not-a-path");
+        assert!(result.unwrap_err().contains("absolute"));
+    }
+
+    #[test]
+    fn validate_rejects_control_chars() {
+        let result = validate_user_entry("C:\\foo\nbar.exe");
+        assert!(result.unwrap_err().contains("control"));
+    }
+
+    #[test]
+    fn validate_rejects_overlong_path() {
+        let long = format!("C:\\{}", "a".repeat(5000));
+        let result = validate_user_entry(&long);
+        assert!(result.unwrap_err().contains("4096"));
+    }
+
+    #[test]
+    fn normalize_strips_quotes_and_whitespace() {
+        // Nonexistent file → 8.3 resolution skipped, pure normalization.
+        let normalized = normalize_user_entry("  \"C:\\Program Files\\Foo\\bar.exe\"  ");
+        assert_eq!(
+            normalized.as_deref(),
+            Some("C:\\Program Files\\Foo\\bar.exe")
+        );
+    }
+
+    #[test]
+    fn normalize_strips_trailing_separator() {
+        let normalized = normalize_user_entry("C:\\Program Files\\Foo\\bar.exe\\");
+        assert_eq!(
+            normalized.as_deref(),
+            Some("C:\\Program Files\\Foo\\bar.exe")
+        );
+    }
+
+    #[test]
+    fn normalize_rejects_relative_path() {
+        assert_eq!(normalize_user_entry("not-a-path"), None);
+        assert_eq!(normalize_user_entry("foo/bar.exe"), None);
+        assert_eq!(normalize_user_entry("C:foo.exe"), None); // drive-relative
+    }
+
+    #[test]
+    fn normalize_rejects_control_chars() {
+        assert_eq!(normalize_user_entry("C:\\foo\nbar.exe"), None);
+        assert_eq!(normalize_user_entry("C:\\foo\tbar.exe"), None);
+    }
+
+    #[test]
+    fn normalize_rejects_empty_input() {
+        assert_eq!(normalize_user_entry(""), None);
+        assert_eq!(normalize_user_entry("   "), None);
+        assert_eq!(normalize_user_entry("\"\""), None);
+    }
+
+    #[test]
+    fn normalize_rejects_overlong_path() {
+        let long = format!("C:\\{}", "a".repeat(5000));
+        assert_eq!(normalize_user_entry(&long), None);
+    }
+
+    #[test]
+    fn normalize_accepts_unc_path() {
+        let normalized = normalize_user_entry(r"\\server\share\app.exe");
+        assert_eq!(normalized.as_deref(), Some(r"\\server\share\app.exe"));
+    }
+
+    #[test]
+    fn duplicate_add_is_case_insensitive_noop() {
+        // Caller pattern (main.rs WhitelistAdd): normalize the new input, then
+        // compare case-insensitively against existing entries — a duplicate is
+        // a no-op, never a second entry.
+        let existing = vec!["C:\\Program Files\\MyApp\\app.exe".to_string()];
+        let normalized = normalize_user_entry("\"c:\\program files\\myapp\\app.exe\"")
+            .expect("case variant normalizes");
+        let is_dup = existing
+            .iter()
+            .any(|e| e.eq_ignore_ascii_case(&normalized));
+        assert!(is_dup, "case-insensitive duplicate must be detected");
+        // And the entry list is unchanged (caller pushes nothing).
+        assert_eq!(existing.len(), 1);
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn normalize_resolves_8dot3_short_names() {
+        // Create a long-named temp dir, get its 8.3 short form, and verify
+        // normalize_user_entry expands it back to the long form.
+        let long_dir = std::env::temp_dir().join(format!(
+            "portunity-83-test-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&long_dir).unwrap();
+        let long = long_dir.to_string_lossy().to_string();
+        let short = short_path_for_test(&long);
+        let _ = std::fs::remove_dir_all(&long_dir);
+
+        if let Some(short) = short {
+            if short != long {
+                let normalized = normalize_user_entry(&short)
+                    .expect("8.3 short path must normalize");
+                assert_eq!(normalized, long);
+            }
+        }
+    }
+
+    /// Get the 8.3 short form of a path (Windows only, test helper).
+    #[cfg(target_os = "windows")]
+    fn short_path_for_test(path: &str) -> Option<String> {
+        use windows::core::PCWSTR;
+        use windows::Win32::Storage::FileSystem::GetShortPathNameW;
+
+        let wide: Vec<u16> = path.encode_utf16().chain(std::iter::once(0)).collect();
+        let ptr = PCWSTR(wide.as_ptr());
+        let required = unsafe { GetShortPathNameW(ptr, None) };
+        if required == 0 {
+            return None;
+        }
+        let mut buf = vec![0u16; required as usize];
+        let len = unsafe { GetShortPathNameW(ptr, Some(&mut buf)) };
+        if len == 0 {
+            return None;
+        }
+        Some(String::from_utf16_lossy(&buf[..len as usize]))
+    }
 }
