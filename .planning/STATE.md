@@ -3,29 +3,30 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: in_progress
-stopped_at: Phase 2 UI-SPEC approved
-last_updated: "2026-07-31T08:12:39.268Z"
+stopped_at: Completed 02-01-PLAN.md (smart kill core + TUI surface)
+last_updated: "2026-08-01T02:07:57.166Z"
 progress:
   total_phases: 2
   completed_phases: 1
-  total_plans: 4
-  completed_plans: 4
+  total_plans: 7
+  completed_plans: 5
+current_phase_name: Process Management & Smart Kill
 ---
 
 # Project State: Portunity
 
 **Project:** Windows Port Management Tool
 **Core Value:** Instantly find, classify, and act on any active port and its owning process — zero friction from discovery to action.
-**Current Focus:** Phase 01 — tui-port-viewer
+**Current Focus:** Phase 2 — Process Management & Smart Kill
 
 ## Current Position
 
 | Field | Value |
 |-------|-------|
 | **Milestone** | 1 |
-| **Current Phase** | 1 — TUI Port Viewer | Complete (4/4 plans) |
-| **Current Plan** | All plans complete. Next: Phase 2 — Process Management & Smart Kill |
-| **Phase Status** | Complete |
+| **Current Phase** | 2 — Process Management & Smart Kill (1/3 plans) |
+| **Current Plan** | 02-01 complete (smart kill core + TUI surface). Next: 02-02 (detail panel) |
+| **Phase Status** | In progress |
 | **Progress** | `[██░░░░░░░░░░░░░░░░]` 1/6 phases complete |
 
 ## Accumulated Context
@@ -64,6 +65,13 @@ progress:
 | Admin elevation: ShellExecuteExW runas | 1 | D-06: Triggers UAC prompt. Old process exits immediately (D-08: no state transfer). User decline continues in non-admin (D-07) |
 | System process detection heuristic | 1 | PID < 1000 OR name in known set. Cosmetic dimming only — not access control. Full whitelist in Phase 2 |
 | windows-rs v0.62 API adaptation for elevation | 1 | ShellExecuteExW returns Result<()>, SHELLEXECUTEINFOW uses Anonymous union, IsUserAnAdmin in Win32::UI::Shell, SW_SHOW needs WindowsAndMessaging feature |
+| ProcessSnapshot (PID + creation FILETIME + path) over bare PID for kill identity | 2 | HANDLE is !Send — pure-data snapshot crosses the mpsc channel; handle opened+verified+acted on inside one spawn_blocking scope (PROC-07, Pitfall #1) |
+| BUILTIN whitelist = 25 entries (Restart Manager Tier-1 14 + Tier-2 11) | 2 | A1 human-verified at checkpoint: explorer.exe deliberately excluded, securesystem typo fixed. HardBlocked tier checked BEFORE OpenProcess (Pitfall #11) |
+| Two-tier protection: HardBlocked (built-in) / UserConfirm (user path whitelist) | 2 | D-09/D-10: built-in by basename+PID, user by normalized full path; built-in wins when both match (Pitfall #6) |
+| Ctrl+C helper self-reexec (`--ctrl-c <pid>`, hidden clap flag) | 2 | D-02/Pitfall 7: helper does the FreeConsole/AttachConsole dance — never the TUI process; exit 0=delivered/1=no console; live-verified delivers Ctrl+C to CREATE_NEW_CONSOLE child |
+| Win32 error mapping: HRESULT 0x8007XXXX → low-16-bit code | 2 | windows-rs Error.code() is HRESULT; masking low 16 bits is required for ERROR_ACCESS_DENIED (5) → AccessDenied (D-03) |
+| HardBlocked status copy: compact form at ≤80 cols | 2 | A9 declared: "✗ {name} … Press w to review the whitelist." (name budget term_width−41) — full 127+ char form never fits the 80-col gate |
+| Plan 02-01 smart kill complete | 2 | Tracer 511da68 + fixes fa8a682/05e9d89 + TUI cd80ccc. 62 tests green. x-key kill, confirm dialog, status outcomes, auto-refresh, whitelist gate |
 | 5-tab dashboard with tab bar highlighting | 1 | active_tab: usize (0-based, 0=Overview default per D-14), per-tab Component trait dispatch, tab bar: Bold+accent_primary bg for active, Dim+fg_muted for inactive |
 | Resize gate: 80x24 minimum terminal | 1 | frame.area() checked at start of render_app(); below threshold renders centered "Terminal too small" message, hides normal layout (TUI-07) |
 | Placeholder tab pattern | 1 | History/Traffic/Firewall tabs render centered "Coming later" message with "Press 1 or 2 to view active tabs" nav hint; content deferred to Phases 3/4 |
@@ -73,7 +81,7 @@ progress:
 ### Key TODOs across phases
 
 - [x] **Phase 1:** Set up single Cargo workspace; implement dual-stack TCP/UDP scanner with buffer retry; build Ratatui Elm Architecture main loop with VirtualTable — COMPLETE
-- [ ] **Phase 2:** Implement ProcessHandle safety wrapper; build shipped system-critical whitelist (~30 processes); implement smart kill escalation
+- [ ] **Phase 2:** ProcessSnapshot safety wrapper + built-in whitelist (25 entries) + smart kill escalation + x-key TUI kill surface — 02-01 DONE; remaining: 02-02 detail panel, 02-03 whitelist overlay + Help overlay
 - [ ] **Phase 3:** Integrate ferrisetw with startup orphan cleanup; build lock-free callback-to-async bridge; implement SQLite history append-only log
 - [ ] **Phase 4:** Build COM firewall rule CRUD abstraction; implement right-click quick actions; implement JSON/CSV export
 - [ ] **Phase 5:** Register Tauri commands wrapping port-core APIs; build system tray with popup; implement Svelte reactive stores
@@ -93,16 +101,21 @@ progress:
 | ETW events dropped | N/A | 0 under 100 conn/sec | 3 |
 | Binary size (TUI, release) | 1.1MB | < 10MB stripped | 1 | Actual: 1.1MB — well under 10MB target |
 | SQLite concurrent access | N/A | No BUSY errors, dual-frontend | 3 |
+**Per-Plan Metrics:**
+
+| Plan | Duration | Tasks | Files |
+|------|----------|-------|-------|
+| Phase 02-process-management-smart-kill P02-01 | 2.5h | 2 tasks | 18 files |
 
 ## Session Continuity
 
-**Last session:** 2026-07-31T08:12:39.245Z
-**Stopped at:** Phase 2 UI-SPEC approved
-**Resume file:** .planning/phases/02-process-management-smart-kill/02-UI-SPEC.md
+**Last session:** 2026-08-01T00:00:00Z
+**Stopped at:** Completed 02-01-PLAN.md (smart kill core + TUI surface)
+**Resume file:** .planning/phases/02-process-management-smart-kill/02-01-SUMMARY.md
 
-- **Last action:** Phase 1 (TUI Port Viewer) fully executed and verified — 13 commits, UAT 10/10 passed. Human verification found and fixed 9 bugs (keyboard double-fire, sort cycle, filter input model, screen flash).
-- **Next action:** `/gsd-plan-phase 2` to create detailed plan for Phase 2: Process Management & Smart Kill
-- **Research flags:** Phase 2 (ProcessHandle safety wrapper, smart kill escalation, system whitelist), Phase 3 (ETW event schemas), Phase 5 (Tauri system tray), Phase 6 (windows-wfp API, SQLite FTS5)
+- **Last action:** Plan 02-01 executed — 4 commits (511da68 tracer, fa8a682/05e9d89 A1 review fixes, cd80ccc TUI surface). 62 tests green; live-verified --ctrl-c helper delivery; format_kill_status unit tests; two-stage protection gate.
+- **Next action:** Execute plan 02-02 (detail panel) then 02-03 (whitelist overlay + Help overlay); end-of-phase manual UAT per human_verify_mode
+- **Research flags:** Phase 3 (ETW event schemas), Phase 5 (Tauri system tray), Phase 6 (windows-wfp API, SQLite FTS5)
 
 ---
 

@@ -62,7 +62,7 @@ Plans:
 Plans:
 **Wave 1**
 
-- [ ] 02-01-PLAN.md — Smart kill: core escalation pipeline (ProcessSnapshot, whitelist gate, graceful→timeout→force) + TUI kill surface (x key, confirm dialog, status bar outcomes, auto-refresh)
+- [x] 02-01-PLAN.md — Smart kill: core escalation pipeline (ProcessSnapshot, whitelist gate, graceful→timeout→force) + TUI kill surface (x key, confirm dialog, status bar outcomes, auto-refresh) — COMPLETE (2026-08-01, 62 tests green)
 
 **Wave 2** *(blocked on Wave 1 completion)*
 

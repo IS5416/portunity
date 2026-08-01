@@ -28,13 +28,13 @@ Requirements for initial release. All features ship in one milestone, organized 
 
 ### Process Management (PROC)
 
-- [ ] **PROC-01**: User can terminate the process owning a selected port directly from the port list
-- [ ] **PROC-02**: Smart kill: app sends graceful shutdown first (WM_CLOSE for GUI, Ctrl+C for console), waits configurable timeout, force-kills (TerminateProcess) if unresponsive
-- [ ] **PROC-03**: Instant kill is the default action for non-whitelisted processes; whitelisted processes show confirmation dialog before kill
-- [ ] **PROC-04**: Built-in whitelist protects ~30 system-critical processes (smss.exe, csrss.exe, wininit.exe, services.exe, lsass.exe, svchost.exe, winlogon.exe, System, Idle, etc.)
-- [ ] **PROC-05**: User can customize the whitelist in settings (add/remove processes by executable path)
-- [ ] **PROC-06**: User can view process details: full executable path, start time, command line arguments, digital signature status, parent PID
-- [ ] **PROC-07**: Process HANDLE is retained from OpenProcess; PID is never re-derived after storage (PID reuse safety)
+- [x] **PROC-01**: User can terminate the process owning a selected port directly from the port list — 02-01 (x key, integration-tested against real children)
+- [x] **PROC-02**: Smart kill: app sends graceful shutdown first (WM_CLOSE for GUI, Ctrl+C for console), waits configurable timeout, force-kills (TerminateProcess) if unresponsive — 02-01 (escalation pipeline + route_strategy matrix + timeout→force test)
+- [x] **PROC-03**: Instant kill is the default action for non-whitelisted processes; whitelisted processes show confirmation dialog before kill — 02-01 (two-stage protection gate, 60x7 confirm dialog)
+- [x] **PROC-04**: Built-in whitelist protects ~30 system-critical processes (smss.exe, csrss.exe, wininit.exe, services.exe, lsass.exe, svchost.exe, winlogon.exe, System, Idle, etc.) — 02-01 (25 entries, human-verified A1, HardBlocked before OpenProcess)
+- [ ] **PROC-05**: User can customize the whitelist in settings (add/remove processes by executable path) — plan 02-03 (w overlay; settings.toml fields + matching already shipped in 02-01)
+- [ ] **PROC-06**: User can view process details: full executable path, start time, command line arguments, digital signature status, parent PID — plan 02-02 (detail panel; ProcessSnapshot/creation time foundation shipped in 02-01)
+- [x] **PROC-07**: Process HANDLE is retained from OpenProcess; PID is never re-derived after storage (PID reuse safety) — 02-01 (ProcessSnapshot creation-time verification, churn test, mismatch abort)
 
 ### History (HIST)
 
@@ -130,13 +130,13 @@ Requirements for initial release. All features ship in one milestone, organized 
 | SRCH-04 | Phase 6 | Pending |
 | SRCH-05 | Phase 6 | Pending |
 | SRCH-06 | Phase 6 | Pending |
-| PROC-01 | Phase 2 | Pending |
-| PROC-02 | Phase 2 | Pending |
-| PROC-03 | Phase 2 | Pending |
-| PROC-04 | Phase 2 | Pending |
-| PROC-05 | Phase 2 | Pending |
-| PROC-06 | Phase 2 | Pending |
-| PROC-07 | Phase 2 | Pending |
+| PROC-01 | Phase 2 | Complete (02-01) |
+| PROC-02 | Phase 2 | Complete (02-01) |
+| PROC-03 | Phase 2 | Complete (02-01) |
+| PROC-04 | Phase 2 | Complete (02-01) |
+| PROC-05 | Phase 2 | Pending (02-03) |
+| PROC-06 | Phase 2 | Pending (02-02) |
+| PROC-07 | Phase 2 | Complete (02-01) |
 | HIST-01 | Phase 3 | Pending |
 | HIST-02 | Phase 3 | Pending |
 | HIST-03 | Phase 3 | Pending |
