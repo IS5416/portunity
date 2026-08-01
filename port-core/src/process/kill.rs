@@ -21,7 +21,7 @@ use windows::Win32::Foundation::{
 };
 use windows::core::BOOL;
 use windows::Win32::System::Threading::{
-    GetExitCodeProcess, TerminateProcess, WaitForSingleObject,
+    GetExitCodeProcess, GetProcessId, TerminateProcess, WaitForSingleObject,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     EnumWindows, GetWindowLongW, GetWindowThreadProcessId, IsWindowVisible, PostMessageW,
@@ -165,13 +165,18 @@ fn kill_blocking(
 
     let pid = snapshot.pid;
 
-    // Step 4: Probe visible windows via EnumWindows
-    let has_visible_windows = has_visible_window_for_pid(pid);
+    // Step 4: Probe visible windows via EnumWindows. The probe is keyed on
+    // the VERIFIED handle, not the raw PID (WR-02): the callback compares
+    // the window's PID against GetProcessId(handle) — the handle keeps the
+    // process object alive, so the numeric PID cannot be recycled and a
+    // matching window is guaranteed to belong to the verified process.
+    // WM_CLOSE is never posted to a PID-reused impostor.
+    let has_visible_windows = has_visible_window(handle.handle);
 
     let graceful_dispatched = if has_visible_windows {
         // Send WM_CLOSE to the first visible top-level window.
         // UIPI may silently block cross-integrity — the timeout handles that.
-        post_wm_close_to_pid(pid);
+        post_wm_close(handle.handle);
         true
     } else {
         // Step 5: Try the Ctrl+C helper (also serves as console probe).
@@ -240,13 +245,20 @@ fn terminate_and_wait(handle: HANDLE, pid: u32) -> KillOutcome {
 // ----------------------------------------------------------------
 
 /// Context for the enum_window_callback — passed via LPARAM.
+///
+/// Holds the VERIFIED process handle (WR-02): the callback compares the
+/// window's PID against `GetProcessId(handle)`. The handle keeps the
+/// process object alive, so the numeric PID cannot be recycled while it
+/// is open — a window PID equal to `GetProcessId(handle)` belongs to the
+/// verified process, never a PID-reused impostor.
 struct WindowEnumCtx {
-    target_pid: u32,
+    handle: HANDLE,
     found: bool,
 }
 
 /// Callback for `EnumWindows` — checks if any visible top-level window
-/// belongs to the target PID. Skips tool windows (WS_EX_TOOLWINDOW).
+/// belongs to the verified process (handle-anchored, WR-02).
+/// Skips tool windows (WS_EX_TOOLWINDOW).
 ///
 /// Returns TRUE (1) to continue enumeration, FALSE (0) to stop.
 unsafe extern "system" fn enum_window_callback(hwnd: HWND, lparam: LPARAM) -> BOOL {
@@ -260,7 +272,7 @@ unsafe extern "system" fn enum_window_callback(hwnd: HWND, lparam: LPARAM) -> BO
         let _ = GetWindowThreadProcessId(hwnd, Some(&mut window_pid));
     }
 
-    if window_pid == ctx.target_pid {
+    if window_pid == GetProcessId(ctx.handle) {
         let ex_style = unsafe { GetWindowLongW(hwnd, GWL_EXSTYLE) };
         if (ex_style as u32 & WS_EX_TOOLWINDOW.0) == 0 {
             let visible = unsafe { IsWindowVisible(hwnd) };
@@ -274,11 +286,11 @@ unsafe extern "system" fn enum_window_callback(hwnd: HWND, lparam: LPARAM) -> BO
     BOOL(1)
 }
 
-/// Check if a process has any visible top-level window.
+/// Check if the verified process has any visible top-level window.
 /// Skips tool windows (WS_EX_TOOLWINDOW).
-fn has_visible_window_for_pid(target_pid: u32) -> bool {
+fn has_visible_window(handle: HANDLE) -> bool {
     let mut ctx = WindowEnumCtx {
-        target_pid,
+        handle,
         found: false,
     };
 
@@ -294,12 +306,12 @@ fn has_visible_window_for_pid(target_pid: u32) -> bool {
 
 /// Context for the post_wm_close_callback.
 struct PostWmCloseCtx {
-    target_pid: u32,
+    handle: HANDLE,
     done: bool,
 }
 
 /// Callback for `EnumWindows` — sends WM_CLOSE to the first visible
-/// top-level window owned by the target PID.
+/// top-level window of the verified process (handle-anchored, WR-02).
 ///
 /// Returns TRUE (1) to continue, FALSE (0) to stop after posting.
 unsafe extern "system" fn post_wm_close_callback(hwnd: HWND, lparam: LPARAM) -> BOOL {
@@ -313,7 +325,7 @@ unsafe extern "system" fn post_wm_close_callback(hwnd: HWND, lparam: LPARAM) -> 
         let _ = GetWindowThreadProcessId(hwnd, Some(&mut window_pid));
     }
 
-    if window_pid == ctx.target_pid {
+    if window_pid == GetProcessId(ctx.handle) {
         let ex_style = unsafe { GetWindowLongW(hwnd, GWL_EXSTYLE) };
         if (ex_style as u32 & WS_EX_TOOLWINDOW.0) == 0 {
             let visible = unsafe { IsWindowVisible(hwnd) };
@@ -330,10 +342,12 @@ unsafe extern "system" fn post_wm_close_callback(hwnd: HWND, lparam: LPARAM) -> 
     BOOL(1)
 }
 
-/// Send WM_CLOSE to the first visible top-level window owned by a process.
-fn post_wm_close_to_pid(target_pid: u32) {
+/// Send WM_CLOSE to the first visible top-level window of the verified
+/// process. A window whose PID does not match `GetProcessId(handle)` is
+/// never signaled (WR-02 — no signaling of PID-reused impostors).
+fn post_wm_close(handle: HANDLE) {
     let mut ctx = PostWmCloseCtx {
-        target_pid,
+        handle,
         done: false,
     };
 
