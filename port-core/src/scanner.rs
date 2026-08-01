@@ -10,12 +10,15 @@ pub mod tcp;
 pub mod udp;
 pub mod resolver;
 
+use std::collections::HashSet;
+
 use async_trait::async_trait;
 
 pub use resolver::ProcessResolver;
 pub use tcp::scan_tcp;
 pub use udp::scan_udp;
 
+use crate::config::AppSettings;
 use crate::models::Connection;
 
 /// Trait for platform-specific port scanning.
@@ -64,7 +67,60 @@ pub async fn scan_all() -> crate::Result<Vec<Connection>> {
         }
     }
 
-    Ok(tcp_conns)
+    // Protection marker post-pass (RESEARCH Pattern 4, plan 02-02 Task 1):
+    // built-in basename match -> is_system_critical; user-entry basename
+    // match -> QueryFullProcessImageNameW -> user_match -> user_protected.
+    // One spawn_blocking scope (Pitfall #9) with fresh settings (D-15).
+    // This keeps filter.rs's `system_only` filter truthful and feeds the
+    // ◆ table markers at render time (O(1) per row — no per-row OpenProcess).
+    let conns = tokio::task::spawn_blocking(move || {
+        let settings =
+            crate::config::load_settings().unwrap_or_else(|_| crate::config::default_settings());
+        apply_protection_postpass(&mut tcp_conns, &settings, crate::process::info::query_full_path);
+        tcp_conns
+    })
+    .await
+    .map_err(|e| crate::Error::Platform(format!("spawn_blocking join error: {}", e)))?;
+
+    Ok(conns)
+}
+
+/// Apply scan-time protection markers (RESEARCH Pattern 4).
+///
+/// For each connection, the built-in tier is checked FIRST (Pitfall #6): a
+/// built-in basename sets `is_system_critical` and the user tier is skipped.
+/// Otherwise, when the process basename matches a user-whitelist entry's
+/// basename, the full executable path is resolved (via `path_for`) and
+/// `user_match` decides `user_protected`. Only same-basename processes pay
+/// the ~1ms path query (D-10: user entries match full paths).
+///
+/// The `path_for` closure abstracts QueryFullProcessImageNameW so the marker
+/// logic is unit-testable without a live Windows process.
+pub(crate) fn apply_protection_postpass<F>(
+    conns: &mut [Connection],
+    settings: &AppSettings,
+    path_for: F,
+) where
+    F: Fn(u32) -> Option<String>,
+{
+    let user_entry_basenames: HashSet<String> = settings
+        .whitelist
+        .iter()
+        .filter_map(|p| std::path::Path::new(p).file_name().and_then(|f| f.to_str()))
+        .map(|s| s.to_lowercase())
+        .collect();
+
+    for conn in conns {
+        let basename = conn.process.name.as_str();
+        if crate::process::builtin_match(conn.process.pid, basename).is_some() {
+            conn.process.is_system_critical = true;
+        } else if user_entry_basenames.contains(&basename.to_lowercase()) {
+            if let Some(path) = path_for(conn.process.pid) {
+                conn.process.user_protected =
+                    crate::process::user_match(&path, &settings.whitelist);
+            }
+        }
+    }
 }
 
 #[cfg(test)]

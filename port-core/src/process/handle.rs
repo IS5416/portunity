@@ -60,7 +60,9 @@ impl Drop for OpenProcessHandle {
 }
 
 /// Open a process with the given access rights.
-fn open_with(pid: u32, rights: PROCESS_ACCESS_RIGHTS) -> crate::Result<OpenProcessHandle> {
+///
+/// `pub(crate)` — reused by `info.rs` for the QLI-only detail fetchers.
+pub(crate) fn open_with(pid: u32, rights: PROCESS_ACCESS_RIGHTS) -> crate::Result<OpenProcessHandle> {
     unsafe {
         let handle = OpenProcess(rights, false, pid).map_err(|e| {
             if win32_error_code(&e) == 5 {
@@ -189,7 +191,10 @@ pub fn creation_matches(actual: FILETIME, expected: FILETIME) -> bool {
 }
 
 /// Wrapper around `QueryFullProcessImageNameW` with a retry for insufficient buffer.
-fn query_full_process_image_name(handle: HANDLE) -> crate::Result<String> {
+///
+/// `pub(crate)` — reused by `info.rs` for the detail fetchers and the
+/// scanner post-pass path resolution.
+pub(crate) fn query_full_process_image_name(handle: HANDLE) -> crate::Result<String> {
     // Start with a 32KiB buffer (MAX_PATH-like but allows long paths).
     // Retry once with 64KiB if the buffer was insufficient.
     for capacity in [32 * 1024usize, 64 * 1024usize] {

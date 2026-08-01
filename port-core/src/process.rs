@@ -18,6 +18,7 @@ pub mod info;
 use async_trait::async_trait;
 
 pub use handle::{creation_matches, open_verified, snapshot_for, ProcessSnapshot};
+pub use info::{fetch_details, verify_signature};
 pub use kill::{kill, route_strategy, KillOutcome, Strategy};
 pub use whitelist::{
     builtin_match, protection_status, user_match, BuiltinEntry, Protection, BUILTIN,
