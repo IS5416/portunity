@@ -272,7 +272,7 @@ unsafe extern "system" fn enum_window_callback(hwnd: HWND, lparam: LPARAM) -> BO
         let _ = GetWindowThreadProcessId(hwnd, Some(&mut window_pid));
     }
 
-    if window_pid == GetProcessId(ctx.handle) {
+    if window_pid == unsafe { GetProcessId(ctx.handle) } {
         let ex_style = unsafe { GetWindowLongW(hwnd, GWL_EXSTYLE) };
         if (ex_style as u32 & WS_EX_TOOLWINDOW.0) == 0 {
             let visible = unsafe { IsWindowVisible(hwnd) };
@@ -325,7 +325,7 @@ unsafe extern "system" fn post_wm_close_callback(hwnd: HWND, lparam: LPARAM) -> 
         let _ = GetWindowThreadProcessId(hwnd, Some(&mut window_pid));
     }
 
-    if window_pid == GetProcessId(ctx.handle) {
+    if window_pid == unsafe { GetProcessId(ctx.handle) } {
         let ex_style = unsafe { GetWindowLongW(hwnd, GWL_EXSTYLE) };
         if (ex_style as u32 & WS_EX_TOOLWINDOW.0) == 0 {
             let visible = unsafe { IsWindowVisible(hwnd) };
