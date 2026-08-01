@@ -18,16 +18,8 @@ pub enum SortColumn {
 }
 
 impl SortColumn {
-    /// Return the next column in the cycle: Port → Protocol → State → ProcessName → Pid → Port.
-    pub fn next(self) -> Self {
-        match self {
-            Self::Port => Self::Protocol,
-            Self::Protocol => Self::State,
-            Self::State => Self::ProcessName,
-            Self::ProcessName => Self::Pid,
-            Self::Pid => Self::Port,
-        }
-    }
+    // Sort cycling is handled inline in update() (same column → toggle direction,
+    // different column → start ascending). No cycle helper needed.
 }
 
 /// Sort direction for the currently sorted column.
@@ -89,9 +81,6 @@ pub enum Message {
     /// Quit the application.
     Quit,
 
-    /// Periodic tick for time-driven updates.
-    Tick,
-
     /// Manual refresh triggered by user (r key).
     Refresh,
 
@@ -123,9 +112,6 @@ pub enum Message {
 
     /// Remove the last character from the search query.
     SearchBackspace,
-
-    /// Clear search query and close the search bar.
-    SearchClear,
 
     /// Open the search bar overlay.
     SearchActivate,

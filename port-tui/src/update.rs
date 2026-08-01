@@ -19,9 +19,6 @@ pub fn update(app: &mut App, msg: Message) {
         Message::Quit => {
             app.should_quit = true;
         }
-        Message::Tick => {
-            // No state change — time-driven re-render handled by main loop
-        }
         Message::Refresh => {
             app.scanning = true;
             app.error = None;
@@ -106,16 +103,6 @@ pub fn update(app: &mut App, msg: Message) {
             app.search_query.clear();
             app.search_cursor_pos = 0;
             // If filter is also active, apply filter instead
-            if app.filter_active {
-                app.filtered_ports = filter::apply_filters(&app.ports, &app.active_filter);
-            } else {
-                app.filtered_ports = app.ports.clone();
-            }
-        }
-        Message::SearchClear => {
-            app.search_query.clear();
-            app.search_cursor_pos = 0;
-            app.search_active = false;
             if app.filter_active {
                 app.filtered_ports = filter::apply_filters(&app.ports, &app.active_filter);
             } else {
