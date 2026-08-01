@@ -4,6 +4,7 @@
 //! - `handle`: ProcessSnapshot (Send-safe) + Win32 handle wrapper
 //! - `whitelist`: Built-in + user-tier protection gating
 //! - `kill`: Smart kill escalation pipeline (WmClose → Ctrl+C → Force)
+//! - `info`: Detail fetchers (path, command line, start time, parent PID, signature)
 //!
 //! The `ProcessManager` trait defines the platform-agnostic interface.
 //! `WindowsProcessManager` (Windows target) delegates to the free functions
@@ -12,6 +13,7 @@
 pub mod handle;
 pub mod whitelist;
 pub mod kill;
+pub mod info;
 
 use async_trait::async_trait;
 
