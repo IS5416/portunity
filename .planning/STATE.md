@@ -3,13 +3,13 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: in_progress
-stopped_at: Completed 02-02-PLAN.md (process detail inspection)
-last_updated: "2026-08-01T02:35:43.971Z"
+stopped_at: Completed 02-03-PLAN.md (whitelist overlay + Help overlay)
+last_updated: "2026-08-01T11:40:00.000Z"
 progress:
   total_phases: 2
   completed_phases: 1
   total_plans: 7
-  completed_plans: 6
+  completed_plans: 7
 current_phase_name: Process Management & Smart Kill
 ---
 
@@ -24,8 +24,8 @@ current_phase_name: Process Management & Smart Kill
 | Field | Value |
 |-------|-------|
 | **Milestone** | 1 |
-| **Current Phase** | 2 — Process Management & Smart Kill (1/3 plans) |
-| **Current Plan** | 02-02 complete (detail fetchers + panel + markers). Next: 02-03 (whitelist + Help overlay) |
+| **Current Phase** | 2 — Process Management & Smart Kill (3/3 plans) |
+| **Current Plan** | 02-03 complete (whitelist overlay + Help overlay + SRCH-02 traceability). All Phase 2 plans done — end-of-phase UAT pending per human_verify_mode |
 | **Phase Status** | In progress |
 | **Progress** | `[██░░░░░░░░░░░░░░░░]` 1/6 phases complete |
 
@@ -82,11 +82,16 @@ current_phase_name: Process Management & Smart Kill
 | WinVerifyTrust 3-way verdict + per-PID cache cleared per scan | 2 | D-07: 0→Signed, TRUST_E_NOSIGNATURE→Unsigned, other→Unknown; cache invalidated on ScanComplete (T-02-07); no stale signature displayed |
 | Detail start time shares the kill identity mechanism (D-08) | 2 | Panel never caches the creation FILETIME; the kill re-captures fresh via snapshot_for(pid) at kill time — no stale identity verified (PROC-07) |
 | windows features += Win32_Security_Cryptography | 2 | WINTRUST_DATA/WinVerifyTrustEx gated behind it in windows-rs 0.62.2; zero new crates (T-02-SC) |
+| Whitelist overlay (w key): validate+save off-runtime, working copy on the main loop | 2 | PROC-05/D-15: WhitelistAdd spawn_blocking validate (normalize, 8.3 via GetLongPathNameW, existence) + save_settings; delete mutates the working copy first, persists post-removal state; duplicate add = case-insensitive no-op (PROC-05); WhitelistSaved {added:false} disambiguated by presence — duplicate info string vs Removed string |
+| Whitelist input validation backstop | 2 | T-02-02: absolute-path syntax (drive/UNC), control-char rejection, ONE quote pair strip, trailing-separator strip, 4096 cap, existence check → "Path does not exist" error, entry not added (UI-SPEC backstop) |
+| windows features += Win32_Storage_FileSystem | 2 | GetLongPathNameW/GetShortPathNameW (8.3 resolution) gated behind it in windows-rs 0.62.2; zero new crates (T-02-SC), same precedent as Cryptography flag |
+| Help overlay (? key) as canonical key reference | 2 | Full keyboard contract incl. footer-dropped s/w + y/n confirm; secrets note (P4) + name-based-matching note (T-02-06); renders above whitelist, below confirm; full-area swallow with confirm dispatch earlier |
+| SRCH-02 verified + traced Complete | 2 | Additive OR-within-Vec ∧ AND-across-dimensions assertion test in filter.rs (engine untouched); REQUIREMENTS.md [x] + traceability Complete (02-03); PROC-05 closed too |
 
 ### Key TODOs across phases
 
 - [x] **Phase 1:** Set up single Cargo workspace; implement dual-stack TCP/UDP scanner with buffer retry; build Ratatui Elm Architecture main loop with VirtualTable — COMPLETE
-- [ ] **Phase 2:** ProcessSnapshot safety wrapper + built-in whitelist (25 entries) + smart kill escalation + x-key TUI kill surface — 02-01 DONE; detail fetchers + 12-row detail panel + protection markers — 02-02 DONE; remaining: 02-03 whitelist overlay + Help overlay
+- [x] **Phase 2:** ProcessSnapshot safety wrapper + built-in whitelist (25 entries) + smart kill escalation + x-key TUI kill surface — 02-01 DONE; detail fetchers + 12-row detail panel + protection markers — 02-02 DONE; whitelist overlay + Help overlay + SRCH-02 traceability — 02-03 DONE (94 tests green; end-of-phase UAT pending)
 - [ ] **Phase 3:** Integrate ferrisetw with startup orphan cleanup; build lock-free callback-to-async bridge; implement SQLite history append-only log
 - [ ] **Phase 4:** Build COM firewall rule CRUD abstraction; implement right-click quick actions; implement JSON/CSV export
 - [ ] **Phase 5:** Register Tauri commands wrapping port-core APIs; build system tray with popup; implement Svelte reactive stores
@@ -112,17 +117,16 @@ current_phase_name: Process Management & Smart Kill
 |------|----------|-------|-------|
 | Phase 02-process-management-smart-kill P02-01 | 2.5h | 2 tasks | 18 files |
 | Phase 02-process-management-smart-kill P02-02 | 25m | 2 tasks | 12 files |
-| Phase 02-process-management-smart-kill P02 | 1.5h | 2 tasks | 12 files |
-| Phase 02-process-management-smart-kill P02 | 25m | 2 tasks | 12 files |
+| Phase 02-process-management-smart-kill P02-03 | 41m | 2 tasks | 12 files |
 
 ## Session Continuity
 
-**Last session:** 2026-08-01T00:00:00Z
-**Stopped at:** Completed 02-01-PLAN.md (smart kill core + TUI surface)
-**Resume file:** .planning/phases/02-process-management-smart-kill/02-01-SUMMARY.md
+**Last session:** 2026-08-01T11:40:00Z
+**Stopped at:** Completed 02-03-PLAN.md (whitelist overlay + Help overlay)
+**Resume file:** .planning/phases/02-process-management-smart-kill/02-03-SUMMARY.md
 
-- **Last action:** Plan 02-02 executed — 4 commits (a382549 RED tests, 70949b2 info.rs + protection post-pass, 86714a0 TUI detail panel, fe48047 details() wiring). 76 tests green; TDD gates honored; 02-01 details() stub resolved and ledger entry 5 marked fixed.
-- **Next action:** Execute plan 02-03 (whitelist overlay + Help overlay); end-of-phase manual UAT per human_verify_mode
+- **Last action:** Plan 02-03 executed — 6 commits (cd345ef RED validation tests, 57e8da4 validate/normalize, 08eca39 w-key overlay, f405947 SRCH-02 AND/OR test, dfafe70 Help overlay + REQUIREMENTS traceability, 0d94bb1 status-string 80-col lock). 94 tests green; TDD gate honored; SRCH-02 + PROC-05 traced Complete; all Phase 2 plans done.
+- **Next action:** End-of-phase manual UAT per human_verify_mode (whitelist hard-block UX, immediate effect, Help overlay, kill escalation visuals); then Phase 3 planning (ETW + history)
 - **Research flags:** Phase 3 (ETW event schemas), Phase 5 (Tauri system tray), Phase 6 (windows-wfp API, SQLite FTS5)
 
 ---

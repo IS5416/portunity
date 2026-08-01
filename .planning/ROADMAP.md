@@ -70,7 +70,7 @@ Plans:
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
-- [ ] 02-03-PLAN.md — Whitelist management overlay (w key, validated add/remove, instant effect) + Help overlay (? key) + SRCH-02 verification & traceability
+- [x] 02-03-PLAN.md — Whitelist management overlay (w key, validated add/remove, instant effect) + Help overlay (? key) + SRCH-02 verification & traceability — COMPLETE (2026-08-01, 94 tests green)
 
 **UI hint:** yes
 
@@ -147,7 +147,7 @@ Plans:
 | Phase | Requirements | Success Criteria | Status | Completed |
 |-------|-------------|-----------------|--------|-----------|
 | 1. TUI Port Viewer | 19 | 5 | In Progress|  |
-| 2. Process Management & Smart Kill | 8 | 5 | In Progress | 02-01, 02-02 (02-03 remaining) |
+| 2. Process Management & Smart Kill | 8 | 5 | In Progress | 02-01, 02-02, 02-03 |
 | 3. Real-Time Monitoring & History | 9 | 5 | Not started | - |
 | 4. Firewall Management & Export | 9 | 5 | Not started | - |
 | 5. Desktop GUI | 4 | 5 | Not started | - |
