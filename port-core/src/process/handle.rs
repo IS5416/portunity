@@ -198,8 +198,12 @@ pub(crate) fn query_full_process_image_name(handle: HANDLE) -> crate::Result<Str
     // Start with a 32KiB buffer (MAX_PATH-like but allows long paths).
     // Retry once with 64KiB if the buffer was insufficient.
     for capacity in [32 * 1024usize, 64 * 1024usize] {
+        // QueryFullProcessImageNameW's lpdwSize is in WCHARs, not bytes
+        // (WR-01): declaring `capacity` here would tell the API the
+        // buffer is twice as large as the allocation — a heap overflow
+        // for extended-length paths. Declare the true character count.
         let mut buf: Vec<u16> = vec![0u16; capacity / 2];
-        let mut size: u32 = capacity as u32;
+        let mut size: u32 = buf.len() as u32;
 
         let result = unsafe {
             QueryFullProcessImageNameW(
