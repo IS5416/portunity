@@ -30,11 +30,11 @@ use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::Paragraph;
 use ratatui::{Frame, Terminal};
 
-use app::{App, KillTone};
+use app::{App, KillTone, WhitelistFocus};
 use components::{
     Component, DetailPanelComponent, FilterPanelComponent, FirewallTabComponent,
     HistoryTabComponent, KillConfirmComponent, OverviewComponent, PortsComponent,
-    SearchComponent, TrafficTabComponent,
+    SearchComponent, TrafficTabComponent, WhitelistOverlayComponent,
 };
 use message::Message;
 use theme::Theme;
@@ -374,6 +374,120 @@ fn run_event_loop(
                                 });
                             }
                         }
+                        // Intercept WhitelistAdd: validate the path off the
+                        // async runtime, then persist via save_settings (D-15
+                        // — the overlay's working copy + the new entry). The
+                        // validation + save run inside spawn_blocking (file
+                        // I/O + Win32 GetLongPathNameW off the runtime).
+                        // Duplicate add (case-insensitive) is a no-op — no
+                        // save, WhitelistSaved { added: false } shows the
+                        // "already on your protection list" info string.
+                        Message::WhitelistAdd { path } => {
+                            if !app.kill_in_flight {
+                                let mut settings = app.whitelist_settings.clone();
+                                let tx_wl = tx.clone();
+                                tokio::task::spawn_blocking(move || {
+                                    match port_core::process::validate_user_entry(&path) {
+                                        Ok(normalized) => {
+                                            let is_dup = settings
+                                                .whitelist
+                                                .iter()
+                                                .any(|e| {
+                                                    e.eq_ignore_ascii_case(&normalized)
+                                                });
+                                            if is_dup {
+                                                let _ = tx_wl.send(Message::WhitelistSaved {
+                                                    path: normalized,
+                                                    added: false,
+                                                });
+                                            } else {
+                                                settings.whitelist.push(normalized.clone());
+                                                match port_core::config::save_settings(
+                                                    &settings,
+                                                ) {
+                                                    Ok(()) => {
+                                                        let _ = tx_wl.send(
+                                                            Message::WhitelistSaved {
+                                                                path: normalized,
+                                                                added: true,
+                                                            },
+                                                        );
+                                                    }
+                                                    Err(e) => {
+                                                        let _ = tx_wl.send(
+                                                            Message::WhitelistError {
+                                                                path,
+                                                                reason: format!(
+                                                                    "could not save settings: {}",
+                                                                    e
+                                                                ),
+                                                            },
+                                                        );
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        Err(reason) => {
+                                            let _ = tx_wl.send(Message::WhitelistError {
+                                                path,
+                                                reason,
+                                            });
+                                        }
+                                    }
+                                });
+                            }
+                        }
+                        // Intercept WhitelistDeleteSelected: bounds-checked
+                        // removal (removal of a non-existent index is a no-op
+                        // — guard before spawning). The working copy is
+                        // mutated FIRST (main-loop-owned state, PROC-05), then
+                        // the post-removal state is persisted off-runtime;
+                        // WhitelistSaved { added: false } completes the status
+                        // string. No confirmation (D-15 — reversible by
+                        // re-adding).
+                        Message::WhitelistDeleteSelected => {
+                            if !app.kill_in_flight {
+                                let idx = app.whitelist_selected;
+                                if idx < app.whitelist_settings.whitelist.len() {
+                                    let removed =
+                                        app.whitelist_settings.whitelist.remove(idx);
+                                    if app.whitelist_selected
+                                        >= app.whitelist_settings.whitelist.len()
+                                    {
+                                        app.whitelist_selected = app
+                                            .whitelist_settings
+                                            .whitelist
+                                            .len()
+                                            .saturating_sub(1);
+                                    }
+                                    let settings = app.whitelist_settings.clone();
+                                    let tx_wl = tx.clone();
+                                    tokio::task::spawn_blocking(move || {
+                                        match port_core::config::save_settings(&settings) {
+                                            Ok(()) => {
+                                                let _ = tx_wl.send(
+                                                    Message::WhitelistSaved {
+                                                        path: removed,
+                                                        added: false,
+                                                    },
+                                                );
+                                            }
+                                            Err(e) => {
+                                                let _ = tx_wl.send(
+                                                    Message::WhitelistError {
+                                                        path: removed,
+                                                        reason: format!(
+                                                            "could not save settings: {}",
+                                                            e
+                                                        ),
+                                                    },
+                                                );
+                                            }
+                                        }
+                                    });
+                                }
+                            }
+                        }
                         // Intercept ToggleDetailPanel: on OPEN, capture the
                         // selected row as the panel's PID and fire the on-demand
                         // detail fetch (D-08) off the async runtime. On fetch
@@ -635,6 +749,49 @@ fn map_key_event(key: crossterm::event::KeyEvent, app: &App) -> Option<Message> 
         }
     }
 
+    // --- Whitelist overlay dispatch (D-14) — UI-SPEC whitelist pass-through
+    // table: j/k/↑/↓ (user-list focus), d (delete selected entry),
+    // Tab/Shift+Tab (focus user-list ↔ input), printable chars + Backspace +
+    // ←/→ (input focus), Enter (add path), Esc (close). r/s and L0 tab/quit
+    // keys pass through to the default match below (the declared exception:
+    // j/k do NOT pass through to the table — the overlay covers it). ---
+    if app.whitelist_active {
+        match key.code {
+            KeyCode::Esc => return Some(Message::ToggleWhitelistOverlay),
+            KeyCode::Tab => return Some(Message::WhitelistFocusNext),
+            KeyCode::BackTab => return Some(Message::WhitelistFocusPrev),
+            KeyCode::Char('j') | KeyCode::Down if app.whitelist_focus == WhitelistFocus::List => {
+                return Some(Message::WhitelistSelectMove { dir: 1 });
+            }
+            KeyCode::Char('k') | KeyCode::Up if app.whitelist_focus == WhitelistFocus::List => {
+                return Some(Message::WhitelistSelectMove { dir: -1 });
+            }
+            KeyCode::Char('d') if app.whitelist_focus == WhitelistFocus::List => {
+                return Some(Message::WhitelistDeleteSelected);
+            }
+            KeyCode::Enter if app.whitelist_focus == WhitelistFocus::Input => {
+                return Some(Message::WhitelistAdd {
+                    path: app.whitelist_input.clone(),
+                });
+            }
+            KeyCode::Backspace if app.whitelist_focus == WhitelistFocus::Input => {
+                return Some(Message::WhitelistBackspace);
+            }
+            KeyCode::Left if app.whitelist_focus == WhitelistFocus::Input => {
+                return Some(Message::WhitelistCursorMove { dir: -1 });
+            }
+            KeyCode::Right if app.whitelist_focus == WhitelistFocus::Input => {
+                return Some(Message::WhitelistCursorMove { dir: 1 });
+            }
+            KeyCode::Char(ch) if app.whitelist_focus == WhitelistFocus::Input && !ch.is_control() => {
+                return Some(Message::WhitelistInput(ch));
+            }
+            // Everything else falls through to the tab-switch / default
+            // matches below (r/s and tab/quit keys pass per UI-SPEC).
+            _ => {}
+        }
+    }
+
     // --- Tab switching (works in all modes) ---
     match key.code {
         KeyCode::Char('1') => return Some(Message::SwitchTab(0)),
@@ -650,6 +807,16 @@ fn map_key_event(key: crossterm::event::KeyEvent, app: &App) -> Option<Message> 
     // --- Default mode dispatch (when no overlay is active) ---
     match key.code {
         KeyCode::Char('q') => Some(Message::Quit),
+        KeyCode::Char('w') => {
+            // Whitelist overlay toggle (D-14) — available from any tab
+            // (UI-SPEC); pressing w again closes it (Esc-equivalent).
+            Some(Message::ToggleWhitelistOverlay)
+        }
+        KeyCode::Char('?') => {
+            // Help overlay — universal (UI-SPEC: the canonical reference for
+            // the footer-dropped s/w keys). Works on any tab.
+            Some(Message::ToggleHelp)
+        }
         KeyCode::Char('r') => Some(Message::Refresh),
         KeyCode::Char('s') => Some(Message::Sort(app.sort_column)),
         KeyCode::Char('d') => {
@@ -816,27 +983,13 @@ fn render_app(f: &mut Frame, app: &App, theme: &Theme) {
         // Detail panel — 12-row top-anchored Clear-over (D-05: the table is
         // never squeezed; >=9 table rows stay visible at 80x24). Stack order
         // per UI-SPEC: table -> search -> filter -> detail -> (whitelist,
-        // plan 02-03) -> confirm.
+        // plan 02-03) -> (help) -> confirm.
         if app.detail_active {
             let detail_area = Rect {
                 height: 12,
                 ..content_area
             };
             DetailPanelComponent.render(app, f, detail_area, theme);
-        }
-
-        // Kill confirmation dialog — centered 60x7 popup, always topmost
-        // (UI-SPEC overlay stack: table -> search -> filter -> ... -> confirm)
-        if app.confirm_pid.is_some() {
-            let w = content_area.width;
-            let h = content_area.height;
-            let confirm_area = Rect {
-                x: content_area.x + (w.saturating_sub(60)) / 2,
-                y: content_area.y + (h.saturating_sub(7)) / 2,
-                width: 60.min(w),
-                height: 7.min(h),
-            };
-            KillConfirmComponent.render(app, f, confirm_area, theme);
         }
     } else {
         // Other tabs get full content area
@@ -847,6 +1000,33 @@ fn render_app(f: &mut Frame, app: &App, theme: &Theme) {
             4 => FirewallTabComponent.render(app, f, content_area, theme),
             _ => {} // unreachable — guarded by update bounds check
         }
+    }
+
+    // Whitelist overlay (D-14) — any tab (UI-SPEC: w available from any tab).
+    // Full content width x (content height - 1) rows, Clear-over (20 rows at
+    // 80x24). Renders above the tab content (incl. the detail panel) and
+    // below help and the confirm dialog (UI-SPEC overlay stack).
+    if app.whitelist_active {
+        let wl_area = Rect {
+            height: content_area.height.saturating_sub(1),
+            ..content_area
+        };
+        WhitelistOverlayComponent.render(app, f, wl_area, theme);
+    }
+
+    // Kill confirmation dialog — centered 60x7 popup, always topmost
+    // (UI-SPEC overlay stack: table -> search -> filter -> detail ->
+    // whitelist -> help -> confirm). Only reachable from the Ports tab.
+    if app.confirm_pid.is_some() {
+        let w = content_area.width;
+        let h = content_area.height;
+        let confirm_area = Rect {
+            x: content_area.x + (w.saturating_sub(60)) / 2,
+            y: content_area.y + (h.saturating_sub(7)) / 2,
+            width: 60.min(w),
+            height: 7.min(h),
+        };
+        KillConfirmComponent.render(app, f, confirm_area, theme);
     }
 
     // Status bar
@@ -989,6 +1169,7 @@ fn render_status_bar(f: &mut Frame, area: Rect, app: &App, theme: &Theme) {
         // Kill outcome / progress (D-04) — 8 locked UI-SPEC strings
         let tone_style = match ks.tone {
             KillTone::InProgress => theme.fg_default,
+            KillTone::Info => theme.status_info,
             KillTone::Success => theme.status_success,
             KillTone::Error => theme.status_error,
         };
@@ -1069,6 +1250,24 @@ fn render_footer(f: &mut Frame, area: Rect, app: &App, theme: &Theme) {
                 app.filtered_ports.len(),
                 app.ports.len()
             ), muted),
+        ]);
+        let footer = Paragraph::new(Text::from(line))
+            .style(Style::default().bg(theme.bg_surface))
+            .centered();
+        f.render_widget(footer, area);
+    } else if app.whitelist_active {
+        // Whitelist overlay footer (UI-SPEC Footer table — locked string):
+        // "[j/k]Move [d]Delete [Tab]Focus [Enter]Add [Esc]Close"
+        let line = Line::from(vec![
+            Span::styled("[j/k]Move", accent),
+            Span::styled(" ", muted),
+            Span::styled("[d]Delete", accent),
+            Span::styled(" ", muted),
+            Span::styled("[Tab]Focus", accent),
+            Span::styled(" ", muted),
+            Span::styled("[Enter]Add", accent),
+            Span::styled(" ", muted),
+            Span::styled("[Esc]Close", accent),
         ]);
         let footer = Paragraph::new(Text::from(line))
             .style(Style::default().bg(theme.bg_surface))

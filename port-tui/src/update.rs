@@ -10,7 +10,7 @@ use port_core::filter;
 use port_core::models::Filter;
 use port_core::process::Protection;
 
-use crate::app::{format_kill_status, App, KillStatus, KillTone};
+use crate::app::{format_kill_status, App, KillStatus, KillTone, WhitelistFocus};
 use crate::message::{FilterField, Message, SortColumn, SortOrder};
 
 /// Process a message and mutate application state accordingly.
@@ -338,6 +338,106 @@ pub fn update(app: &mut App, msg: Message) {
             }
         }
 
+        // --- Whitelist overlay handlers (D-13..D-15, PROC-05) ---
+
+        Message::ToggleWhitelistOverlay => {
+            // Toggle the overlay. On OPEN: fresh settings read (D-15 working-
+            // copy contract). Synchronous load — the UI-SPEC backstop declares
+            // "no loading state exists by design" (settings.toml read is
+            // <1ms); this is the one allowed sync file read on the runtime.
+            app.whitelist_active = !app.whitelist_active;
+            if app.whitelist_active {
+                app.whitelist_settings = port_core::config::load_settings()
+                    .unwrap_or_else(|_| port_core::config::default_settings());
+                app.whitelist_focus = WhitelistFocus::List;
+                app.whitelist_selected = 0;
+                app.whitelist_input.clear();
+                app.whitelist_input_cursor = 0;
+            }
+        }
+        Message::WhitelistFocusNext => {
+            app.whitelist_focus = app.whitelist_focus.next();
+        }
+        Message::WhitelistFocusPrev => {
+            app.whitelist_focus = app.whitelist_focus.prev();
+        }
+        Message::WhitelistSelectMove { dir } => {
+            // Move selection within the user list bounds (0..len, clamp).
+            let len = app.whitelist_settings.whitelist.len();
+            if len == 0 {
+                return;
+            }
+            let target = app.whitelist_selected as i64 + dir as i64;
+            app.whitelist_selected = target.clamp(0, len as i64 - 1) as usize;
+        }
+        Message::WhitelistDeleteSelected => {
+            // No-op here — intercept-owned (spawn_blocking save in main.rs);
+            // the removal lands when WhitelistSaved drains.
+        }
+        Message::WhitelistInput(ch) => {
+            // Insert at the cursor (search-bar pattern).
+            if app.whitelist_input_cursor <= app.whitelist_input.len() {
+                app.whitelist_input.insert(app.whitelist_input_cursor, ch);
+            } else {
+                app.whitelist_input.push(ch);
+            }
+            app.whitelist_input_cursor += 1;
+        }
+        Message::WhitelistBackspace => {
+            if app.whitelist_input_cursor > 0 && !app.whitelist_input.is_empty() {
+                app.whitelist_input.remove(app.whitelist_input_cursor - 1);
+                app.whitelist_input_cursor -= 1;
+            }
+        }
+        Message::WhitelistCursorMove { dir } => {
+            let len = app.whitelist_input.len();
+            let target = app.whitelist_input_cursor as i64 + dir as i64;
+            app.whitelist_input_cursor = target.clamp(0, len as i64) as usize;
+        }
+        Message::WhitelistAdd { .. } => {
+            // No-op here — intercept-owned (validate + save in main.rs).
+        }
+        Message::WhitelistSaved { path, added } => {
+            if added {
+                // Add: push to the working copy (dedupe handled in the
+                // intercept closure — a duplicate never reaches save).
+                app.whitelist_settings.whitelist.push(path.clone());
+                app.kill_status = Some(KillStatus {
+                    text: whitelist_added_string(&path, app.term_width),
+                    tone: KillTone::Info,
+                });
+            } else if app
+                .whitelist_settings
+                .whitelist
+                .iter()
+                .any(|e| e.eq_ignore_ascii_case(&path))
+            {
+                // Duplicate add — entry already present; no-op (D-13).
+                app.kill_status = Some(KillStatus {
+                    text: whitelist_duplicate_string(&path, app.term_width),
+                    tone: KillTone::Info,
+                });
+            } else {
+                // Removal — the delete intercept already applied it to the
+                // working copy before saving; the message completes the
+                // status string (D-15 instant effect).
+                app.kill_status = Some(KillStatus {
+                    text: whitelist_removed_string(&path, app.term_width),
+                    tone: KillTone::Info,
+                });
+            }
+        }
+        Message::WhitelistError { path, reason } => {
+            // UI-SPEC backstop: invalid path -> error, not added.
+            app.kill_status = Some(KillStatus {
+                text: whitelist_error_string(&path, &reason, app.term_width),
+                tone: KillTone::Error,
+            });
+        }
+        Message::ToggleHelp => {
+            app.help_active = !app.help_active;
+        }
+
         Message::KillOutcome {
             outcome,
             name,
@@ -555,6 +655,79 @@ fn protocol_order(p: port_core::models::Protocol) -> u8 {
         port_core::models::Protocol::Udp => 1,
         port_core::models::Protocol::Tcp6 => 2,
         port_core::models::Protocol::Udp6 => 3,
+    }
+}
+
+// ── Whitelist status-bar strings (D-13..D-15, UI-SPEC Copywriting) ──
+//
+// All strings fit `term_width` columns (Assumption A9): `{path}` truncates
+// with U+2026 keeping the TAIL — the executable file name is the actionable
+// part (UI-SPEC overflow rule).
+
+/// "Added {path} — kills now require confirmation" (status.info).
+fn whitelist_added_string(path: &str, term_width: u16) -> String {
+    // Fixed chrome: "Added " (6) + " — kills now require confirmation" (33)
+    let fixed = 39usize;
+    let budget = term_width as usize - fixed;
+    format!(
+        "Added {} — kills now require confirmation",
+        truncate_path_tail(path, budget)
+    )
+}
+
+/// "Removed {path} — kills are instant again" (status.info).
+fn whitelist_removed_string(path: &str, term_width: u16) -> String {
+    // Fixed chrome: "Removed " (8) + " — kills are instant again" (27)
+    let fixed = 35usize;
+    let budget = term_width as usize - fixed;
+    format!(
+        "Removed {} — kills are instant again",
+        truncate_path_tail(path, budget)
+    )
+}
+
+/// "{path} is already on your protection list" (status.info — duplicate no-op).
+fn whitelist_duplicate_string(path: &str, term_width: u16) -> String {
+    // Fixed chrome: " is already on your protection list" (36)
+    let fixed = 36usize;
+    let budget = term_width as usize - fixed;
+    format!(
+        "{} is already on your protection list",
+        truncate_path_tail(path, budget)
+    )
+}
+
+/// "Cannot add {path}: {reason}" (status.error — UI-SPEC backstop).
+fn whitelist_error_string(path: &str, reason: &str, term_width: u16) -> String {
+    // Fixed chrome: "Cannot add " (11) + ": " (2) = 13
+    let fixed = 13usize;
+    let reason_short = truncate_ellipsis(reason, 48);
+    let path_budget = (term_width as usize).saturating_sub(fixed + reason_short.chars().count());
+    format!(
+        "Cannot add {}: {}",
+        truncate_path_tail(path, path_budget),
+        reason_short
+    )
+}
+
+/// Truncate a path keeping the tail segment (`…\dir\name.exe`) — the file
+/// name is the actionable part (UI-SPEC overflow rule).
+fn truncate_path_tail(s: &str, max_len: usize) -> String {
+    if s.chars().count() <= max_len {
+        return s.to_string();
+    }
+    let keep = max_len.saturating_sub(1);
+    let tail: String = s.chars().skip(s.chars().count().saturating_sub(keep)).collect();
+    format!("\u{2026}{}", tail)
+}
+
+/// Truncate a string to max_len chars, appending U+2026 if truncated.
+fn truncate_ellipsis(s: &str, max_len: usize) -> String {
+    if s.chars().count() > max_len {
+        let truncated: String = s.chars().take(max_len.saturating_sub(1)).collect();
+        format!("{}\u{2026}", truncated)
+    } else {
+        s.to_string()
     }
 }
 

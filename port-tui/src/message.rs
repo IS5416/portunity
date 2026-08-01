@@ -236,4 +236,44 @@ pub enum Message {
     /// The process the panel is showing left the scan list — render the
     /// name strikethrough and Status "Exited" (UI-SPEC Detail Panel States).
     ProcessExited { pid: u32 },
+
+    // --- Whitelist overlay messages (D-13..D-15, PROC-05) ---
+
+    /// User pressed 'w' — toggle the whitelist overlay (D-14, any tab).
+    ToggleWhitelistOverlay,
+
+    /// Tab — move focus from user list to input (or back).
+    WhitelistFocusNext,
+
+    /// Shift+Tab — move focus from input to user list (or back).
+    WhitelistFocusPrev,
+
+    /// Move the user-list selection (j/k/up/down when the list is focused).
+    WhitelistSelectMove { dir: i8 },
+
+    /// Delete the selected user entry (d) — instant, no confirmation (D-15).
+    WhitelistDeleteSelected,
+
+    /// Append a character to the path input (input focus).
+    WhitelistInput(char),
+
+    /// Remove the character before the input cursor.
+    WhitelistBackspace,
+
+    /// Move the input cursor (left/right arrows).
+    WhitelistCursorMove { dir: i8 },
+
+    /// Enter in the input — validate + persist the path (intercept-owned).
+    WhitelistAdd { path: String },
+
+    /// Add/remove persisted — update() applies the working copy mutation and
+    /// the status-bar string. `added: false` is either a duplicate-add no-op
+    /// (path still present in the working copy) or a completed removal.
+    WhitelistSaved { path: String, added: bool },
+
+    /// Validation or save failure — status-bar error, entry not added.
+    WhitelistError { path: String, reason: String },
+
+    /// User pressed '?' — toggle the Help overlay.
+    ToggleHelp,
 }

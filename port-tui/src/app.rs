@@ -25,10 +25,39 @@ pub struct KillStatus {
 pub enum KillTone {
     /// Kill in progress (graceful signal sent, timeout counting).
     InProgress,
+    /// Informational confirmation (whitelist add/remove — UI-SPEC status.info).
+    Info,
     /// Kill succeeded.
     Success,
     /// Kill failed (access denied, hard block, already exited, other).
     Error,
+}
+
+/// Focus target inside the whitelist overlay (UI-SPEC Focus Management).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WhitelistFocus {
+    /// User list (selectable, j/k/up/down, d deletes).
+    List,
+    /// Path input row (printable chars, Backspace, arrows, Enter adds).
+    Input,
+}
+
+impl WhitelistFocus {
+    /// Cycle to the next focus target (Tab).
+    pub fn next(&self) -> Self {
+        match self {
+            Self::List => Self::Input,
+            Self::Input => Self::List,
+        }
+    }
+
+    /// Cycle to the previous focus target (Shift+Tab).
+    pub fn prev(&self) -> Self {
+        match self {
+            Self::List => Self::Input,
+            Self::Input => Self::List,
+        }
+    }
 }
 
 /// Central application state.
@@ -168,6 +197,32 @@ pub struct App {
     /// cleared on every ScanComplete (in the drain loop) — no stale signature
     /// is ever displayed (T-02-07).
     pub signature_cache: HashMap<u32, Option<bool>>,
+
+    // --- Whitelist overlay state (D-13..D-15, PROC-05) ---
+
+    /// Whether the whitelist overlay is open (D-14).
+    pub whitelist_active: bool,
+
+    /// Focus inside the overlay: user list or path input (UI-SPEC Focus
+    /// Management). The built-in section is never focusable (read-only).
+    pub whitelist_focus: WhitelistFocus,
+
+    /// Selected index in the user whitelist list (Reverse highlight).
+    pub whitelist_selected: usize,
+
+    /// Path input buffer (search-bar block-cursor pattern).
+    pub whitelist_input: String,
+
+    /// Cursor position within the path input.
+    pub whitelist_input_cursor: usize,
+
+    /// Working copy of settings — the overlay mutates and persists this
+    /// (D-15). Fresh-loaded on overlay open; kill-time re-reads settings
+    /// from disk independently, so mutations take effect on the next kill.
+    pub whitelist_settings: port_core::config::AppSettings,
+
+    /// Whether the Help overlay is open ('?').
+    pub help_active: bool,
 }
 
 impl App {
@@ -215,6 +270,13 @@ impl App {
             detail_loading: false,
             detail_exited: false,
             signature_cache: HashMap::new(),
+            whitelist_active: false,
+            whitelist_focus: WhitelistFocus::List,
+            whitelist_selected: 0,
+            whitelist_input: String::new(),
+            whitelist_input_cursor: 0,
+            whitelist_settings: port_core::config::default_settings(),
+            help_active: false,
         }
     }
 
