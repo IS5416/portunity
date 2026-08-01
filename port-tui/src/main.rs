@@ -590,6 +590,15 @@ fn run_event_loop(
                     }
                     // Stale result (selection moved on) — dropped.
                 }
+                Message::ScanError(e) => {
+                    // A scan lifecycle ends here too (CR-01): reset the spawn
+                    // guard or the next Refresh finds `scan_spawned == true`,
+                    // never spawns a new scan, and the TUI stays stuck on
+                    // "Scanning..." forever. update() sets scanning=false and
+                    // surfaces the error.
+                    *scan_spawned = false;
+                    update(app, Message::ScanError(e));
+                }
                 Message::KillPrepared {
                     snapshot,
                     protection,
