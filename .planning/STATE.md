@@ -4,7 +4,7 @@ milestone: v1.0
 milestone_name: milestone
 status: in_progress
 stopped_at: Completed 02-02-PLAN.md (process detail inspection)
-last_updated: "2026-08-01T02:32:15.968Z"
+last_updated: "2026-08-01T02:35:43.971Z"
 progress:
   total_phases: 2
   completed_phases: 1
@@ -111,8 +111,9 @@ current_phase_name: Process Management & Smart Kill
 | Plan | Duration | Tasks | Files |
 |------|----------|-------|-------|
 | Phase 02-process-management-smart-kill P02-01 | 2.5h | 2 tasks | 18 files |
-| Phase 02-process-management-smart-kill P02-02 | 1.5h | 2 tasks | 12 files |
+| Phase 02-process-management-smart-kill P02-02 | 25m | 2 tasks | 12 files |
 | Phase 02-process-management-smart-kill P02 | 1.5h | 2 tasks | 12 files |
+| Phase 02-process-management-smart-kill P02 | 25m | 2 tasks | 12 files |
 
 ## Session Continuity
 

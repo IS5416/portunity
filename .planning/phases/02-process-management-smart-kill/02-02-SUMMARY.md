@@ -52,7 +52,7 @@ tech-stack:
     - "ProcessExited detection in the ScanComplete drain arm: detail_pid absent from the new connection list"
     - "Right-segment-preserving path truncation (…\\dir\\name.exe) + U+2026 right-truncation for command line (UI-SPEC overflow rules)"
 metrics:
-  duration: "~1.5h execution (started 2026-08-01T02:14:02Z)"
+  duration: "~25m execution (started 2026-08-01T02:14:02Z)"
   tasks: 2
   commits: 4 (a382549, 70949b2, 86714a0, fe48047)
   tests: 76 passing (59 unit + 5 kill integration + 1 churn + 11 TUI)
