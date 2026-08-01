@@ -66,7 +66,7 @@ Plans:
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 02-02-PLAN.md — Process detail inspection: core detail fetchers (path/cmdline/start/parent/signature), scan-time protection markers, 12-row detail panel, ◆ table markers
+- [x] 02-02-PLAN.md — Process detail inspection: core detail fetchers (path/cmdline/start/parent/signature), scan-time protection markers, 12-row detail panel, ◆ table markers — COMPLETE (2026-08-01, 76 tests green)
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
@@ -147,7 +147,7 @@ Plans:
 | Phase | Requirements | Success Criteria | Status | Completed |
 |-------|-------------|-----------------|--------|-----------|
 | 1. TUI Port Viewer | 19 | 5 | In Progress|  |
-| 2. Process Management & Smart Kill | 8 | 5 | Not started | - |
+| 2. Process Management & Smart Kill | 8 | 5 | In Progress | 02-01, 02-02 (02-03 remaining) |
 | 3. Real-Time Monitoring & History | 9 | 5 | Not started | - |
 | 4. Firewall Management & Export | 9 | 5 | Not started | - |
 | 5. Desktop GUI | 4 | 5 | Not started | - |

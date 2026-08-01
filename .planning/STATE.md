@@ -3,13 +3,13 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: in_progress
-stopped_at: Completed 02-01-PLAN.md (smart kill core + TUI surface)
-last_updated: "2026-08-01T02:07:57.166Z"
+stopped_at: Completed 02-02-PLAN.md (process detail inspection)
+last_updated: "2026-08-01T02:32:15.968Z"
 progress:
   total_phases: 2
   completed_phases: 1
   total_plans: 7
-  completed_plans: 5
+  completed_plans: 6
 current_phase_name: Process Management & Smart Kill
 ---
 
@@ -25,7 +25,7 @@ current_phase_name: Process Management & Smart Kill
 |-------|-------|
 | **Milestone** | 1 |
 | **Current Phase** | 2 — Process Management & Smart Kill (1/3 plans) |
-| **Current Plan** | 02-01 complete (smart kill core + TUI surface). Next: 02-02 (detail panel) |
+| **Current Plan** | 02-02 complete (detail fetchers + panel + markers). Next: 02-03 (whitelist + Help overlay) |
 | **Phase Status** | In progress |
 | **Progress** | `[██░░░░░░░░░░░░░░░░]` 1/6 phases complete |
 
@@ -78,10 +78,15 @@ current_phase_name: Process Management & Smart Kill
 | Release build profile | 1 | LTO + single codegen unit + strip symbols + opt-level=3; binary size: 1.1MB (target <10MB) |
 | SKELETON.md architectural record | 1 | 227-line comprehensive document covering all 20+ Phase 1 decisions, data flow, crate graph, module map, pitfall coverage, out-of-scope map, subsequent slice plan |
 
+| Plan 02-02 detail inspection complete | 2 | PROC-06 detail fetchers (path via QueryFullProcessImageNameW, cmdline via ntdll class 60 two-call, start via creation FILETIME, parent via Toolhelp32, signature via WinVerifyTrustEx) + scan-time ◆ post-pass + d-key 12-row panel; 76 tests green; TDD RED a382549 / GREEN 70949b2 / TUI 86714a0 / details-wiring fe48047 |
+| WinVerifyTrust 3-way verdict + per-PID cache cleared per scan | 2 | D-07: 0→Signed, TRUST_E_NOSIGNATURE→Unsigned, other→Unknown; cache invalidated on ScanComplete (T-02-07); no stale signature displayed |
+| Detail start time shares the kill identity mechanism (D-08) | 2 | Panel never caches the creation FILETIME; the kill re-captures fresh via snapshot_for(pid) at kill time — no stale identity verified (PROC-07) |
+| windows features += Win32_Security_Cryptography | 2 | WINTRUST_DATA/WinVerifyTrustEx gated behind it in windows-rs 0.62.2; zero new crates (T-02-SC) |
+
 ### Key TODOs across phases
 
 - [x] **Phase 1:** Set up single Cargo workspace; implement dual-stack TCP/UDP scanner with buffer retry; build Ratatui Elm Architecture main loop with VirtualTable — COMPLETE
-- [ ] **Phase 2:** ProcessSnapshot safety wrapper + built-in whitelist (25 entries) + smart kill escalation + x-key TUI kill surface — 02-01 DONE; remaining: 02-02 detail panel, 02-03 whitelist overlay + Help overlay
+- [ ] **Phase 2:** ProcessSnapshot safety wrapper + built-in whitelist (25 entries) + smart kill escalation + x-key TUI kill surface — 02-01 DONE; detail fetchers + 12-row detail panel + protection markers — 02-02 DONE; remaining: 02-03 whitelist overlay + Help overlay
 - [ ] **Phase 3:** Integrate ferrisetw with startup orphan cleanup; build lock-free callback-to-async bridge; implement SQLite history append-only log
 - [ ] **Phase 4:** Build COM firewall rule CRUD abstraction; implement right-click quick actions; implement JSON/CSV export
 - [ ] **Phase 5:** Register Tauri commands wrapping port-core APIs; build system tray with popup; implement Svelte reactive stores
@@ -106,6 +111,8 @@ current_phase_name: Process Management & Smart Kill
 | Plan | Duration | Tasks | Files |
 |------|----------|-------|-------|
 | Phase 02-process-management-smart-kill P02-01 | 2.5h | 2 tasks | 18 files |
+| Phase 02-process-management-smart-kill P02-02 | 1.5h | 2 tasks | 12 files |
+| Phase 02-process-management-smart-kill P02 | 1.5h | 2 tasks | 12 files |
 
 ## Session Continuity
 
@@ -113,8 +120,8 @@ current_phase_name: Process Management & Smart Kill
 **Stopped at:** Completed 02-01-PLAN.md (smart kill core + TUI surface)
 **Resume file:** .planning/phases/02-process-management-smart-kill/02-01-SUMMARY.md
 
-- **Last action:** Plan 02-01 executed — 4 commits (511da68 tracer, fa8a682/05e9d89 A1 review fixes, cd80ccc TUI surface). 62 tests green; live-verified --ctrl-c helper delivery; format_kill_status unit tests; two-stage protection gate.
-- **Next action:** Execute plan 02-02 (detail panel) then 02-03 (whitelist overlay + Help overlay); end-of-phase manual UAT per human_verify_mode
+- **Last action:** Plan 02-02 executed — 4 commits (a382549 RED tests, 70949b2 info.rs + protection post-pass, 86714a0 TUI detail panel, fe48047 details() wiring). 76 tests green; TDD gates honored; 02-01 details() stub resolved and ledger entry 5 marked fixed.
+- **Next action:** Execute plan 02-03 (whitelist overlay + Help overlay); end-of-phase manual UAT per human_verify_mode
 - **Research flags:** Phase 3 (ETW event schemas), Phase 5 (Tauri system tray), Phase 6 (windows-wfp API, SQLite FTS5)
 
 ---

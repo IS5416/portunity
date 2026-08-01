@@ -1,10 +1,10 @@
 ---
 schema_version: 1
-open_count: 6
+open_count: 5
 waived_count: 0
-fixed_count: 0
+fixed_count: 1
 total_count: 6
-last_updated: 2026-08-01T02:07:49.617Z
+last_updated: 2026-08-01T02:32:04.367Z
 ---
 
 # Broken Windows Ledger
@@ -19,7 +19,7 @@ last_updated: 2026-08-01T02:07:49.617Z
 | 2 | 01 | stub | port-tui/src/components/traffic.rs |  | Placeholder tab: 'Coming later' — content deferred to Phase 3 | open |  | 2026-07-28T10:44:27.197Z |  |
 | 3 | 01 | stub | port-tui/src/components/firewall.rs |  | Placeholder tab: 'Coming later' — content deferred to Phase 4 | open |  | 2026-07-28T10:44:27.539Z |  |
 | 4 | 01 | deviation | port-tui/src/components/overview.rs |  | Rule 1: Replaced 'Local Addr' column with 'Proto' in top ports mini-table — Connection model lacks local_address field | open |  | 2026-07-28T10:44:27.947Z |  |
-| 5 | 02 | stub | port-core/src/process.rs |  | WindowsProcessManager::details() returns Err(not yet implemented) - info.rs lands in plan 02-02 | open |  | 2026-08-01T02:07:49.191Z |  |
+| 5 | 02 | stub | port-core/src/process.rs |  | WindowsProcessManager::details() returns Err(not yet implemented) - info.rs lands in plan 02-02 | fixed |  | 2026-08-01T02:07:49.191Z | 2026-08-01T02:32:04.367Z |
 | 6 | 02 | stub | port-tui/src/message.rs | 216 | Message::KillExecute declared but never constructed - future kill paths (plan 02-03) may emit it | open |  | 2026-08-01T02:07:49.617Z |  |
 
 ````json
@@ -79,10 +79,10 @@ last_updated: 2026-08-01T02:07:49.617Z
     "file": "port-core/src/process.rs",
     "line": null,
     "description": "WindowsProcessManager::details() returns Err(not yet implemented) - info.rs lands in plan 02-02",
-    "status": "open",
+    "status": "fixed",
     "reason": "",
     "recorded_at": "2026-08-01T02:07:49.191Z",
-    "resolved_at": null
+    "resolved_at": "2026-08-01T02:32:04.367Z"
   },
   {
     "id": 6,
