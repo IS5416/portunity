@@ -34,8 +34,10 @@ pub struct BuiltinEntry {
 /// Every entry carries a plain-language explanation.
 ///
 /// **Tier 1**: Restart Manager canonical critical services (14 entries).
-/// **Tier 2**: Session infrastructure + security processes (13 entries).
-/// Total: 27 entries, satisfying the >=25 contract (PROC-04).
+/// **Tier 2**: Session infrastructure + security processes (11 entries).
+/// Total: 25 entries, satisfying the >=25 contract (PROC-04).
+/// explorer.exe excluded by design — it restarts itself, and killing it
+/// is disruptive but not system-fatal (RESEARCH decision).
 pub const BUILTIN: &[BuiltinEntry] = &[
     // ── Tier 1: Restart Manager Critical System Services ──
     BuiltinEntry { name: "smss.exe",      reason: "Session Manager — starts and kills user sessions; crashes all sessions if killed" },
@@ -57,7 +59,6 @@ pub const BUILTIN: &[BuiltinEntry] = &[
     BuiltinEntry { name: "lsaiso.exe",    reason: "Credential Guard — isolates LSA secrets in a virtualized container; killing it breaks auth" },
     BuiltinEntry { name: "conhost.exe",   reason: "Console Window Host — hosts console windows; killing it closes all open command prompts" },
     BuiltinEntry { name: "taskhostw.exe", reason: "Task Host — runs scheduled tasks; killing it cancels running system maintenance" },
-    BuiltinEntry { name: "explorer.exe",  reason: "Windows Explorer — taskbar, desktop icons, file manager; restarts itself but may lose tray icons" },
     BuiltinEntry { name: "searchindexer.exe", reason: "Windows Search Indexer — indexes files for search; killing it disables Start menu search" },
     BuiltinEntry { name: "searchhost.exe", reason: "Search Host — powers the search UI in the taskbar and Start menu" },
     BuiltinEntry { name: "startmenuexperiencehost.exe", reason: "Start Menu Experience Host — renders the Start menu; killing it disables Start" },
@@ -65,7 +66,7 @@ pub const BUILTIN: &[BuiltinEntry] = &[
     BuiltinEntry { name: "runtimebroker.exe", reason: "Runtime Broker — enforces app permissions (camera, mic, location); killing it may block app launches" },
     BuiltinEntry { name: "smartscreen.exe", reason: "Windows SmartScreen — reputation-based URL and download protection" },
     BuiltinEntry { name: "securityhealthservice.exe", reason: "Windows Security Health — monitors antivirus, firewall, and device security status" },
-    BuiltinEntry { name: "secureystem.exe", reason: "Virtual Secure Mode — kernel enclave enforcement for Credential Guard and HVCI" },
+    BuiltinEntry { name: "securesystem.exe", reason: "Secure System — kernel enclave enforcement for Credential Guard and HVCI" },
 ];
 
 // PID 4 is "System"
