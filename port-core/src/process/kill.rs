@@ -363,10 +363,22 @@ fn post_wm_close(handle: HANDLE) {
 // Ctrl+C helper
 // ----------------------------------------------------------------
 
-/// Spawn the Ctrl+C helper process (self-reexec with `--ctrl-c <pid>`).
+/// Spawn the Ctrl+C helper process.
 ///
-/// Returns the helper's exit code: 0 = delivered, 1 = no console, other = error.
-/// The helper uses `CREATE_NO_WINDOW` (0x08000000) so it never flashes.
+/// Primary: port-core's own `ctrl_c_helper` binary (WR-03), located next
+/// to the calling executable — cargo builds all workspace binaries into
+/// the same target dir, so dev and packaged builds find it. This keeps
+/// the kill pipeline frontend-agnostic: any binary linking port-core
+/// delivers Ctrl+C correctly instead of re-executing itself with an
+/// undocumented flag only the TUI understands.
+///
+/// Fallback: re-exec `current_exe` with `--ctrl-c <pid>` — the TUI
+/// implements this internal mode; preserved for single-crate builds
+/// (`cargo run -p port-tui`) where the helper binary is not built.
+///
+/// Returns the helper's exit code: 0 = delivered, 1 = no console,
+/// 2 = delivery failed, other = error. The helper uses
+/// `CREATE_NO_WINDOW` (0x08000000) so it never flashes.
 ///
 /// **Caveats** (documented):
 /// - Ctrl+C broadcasts to ALL processes on the target's console.
@@ -375,6 +387,37 @@ fn post_wm_close(handle: HANDLE) {
 /// - "Delivered" does not guarantee "exited" — the WaitForSingleObject timeout
 ///   is the real arbiter (Pitfall 4).
 fn spawn_ctrl_c_helper(pid: u32) -> i32 {
+    // Primary: the port-core helper binary as a sibling of the calling exe.
+    // Candidate 1: same dir as the caller (target/debug layout).
+    // Candidate 2: parent dir — integration tests run from
+    //   target/debug/deps/, where the helper lives one level up.
+    let helper_name = if cfg!(windows) {
+        "ctrl_c_helper.exe"
+    } else {
+        "ctrl_c_helper"
+    };
+    let mut candidates: Vec<std::path::PathBuf> = Vec::new();
+    if let Ok(exe) = std::env::current_exe() {
+        candidates.push(exe.with_file_name(helper_name));
+        if let Some(parent) = exe.parent() {
+            candidates.push(parent.join(helper_name));
+        }
+    }
+    for helper in candidates {
+        if helper.is_file() {
+            match Command::new(&helper)
+                .arg("--ctrl-c")
+                .arg(pid.to_string())
+                .creation_flags(0x08000000) // CREATE_NO_WINDOW
+                .status()
+            {
+                Ok(status) => return status.code().unwrap_or(1),
+                Err(_) => break, // fall through to the re-exec fallback
+            }
+        }
+    }
+
+    // Fallback: re-exec current_exe with the internal --ctrl-c mode.
     let current_exe = match std::env::current_exe() {
         Ok(p) => p,
         Err(_) => return 1,
