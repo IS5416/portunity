@@ -109,6 +109,150 @@ pub fn user_match(path: &str, entries: &[String]) -> bool {
         .any(|entry| normalized.eq_ignore_ascii_case(&normalize_path(entry)))
 }
 
+/// Maximum length of a user whitelist entry (UI-SPEC backstop).
+const MAX_ENTRY_LEN: usize = 4096;
+
+/// Normalize a user-supplied whitelist path for storage.
+///
+/// Steps (RESEARCH Open Question 2 resolution, UI-SPEC backstop):
+/// 1. Trim whitespace.
+/// 2. Strip ONE pair of surrounding double quotes, if present.
+/// 3. Reject (`None`) when empty, containing a control char, or not
+///    absolute (drive prefix `C:` or UNC `\\` start).
+/// 4. When the file exists, resolve 8.3 short names via `GetLongPathNameW`
+///    (Win32 — the caller must run inside `spawn_blocking`; the 8.3
+///    resolver only applies to existing files, so nonexistent paths pass
+///    through unchanged and `validate_user_entry` rejects them).
+/// 5. Strip one trailing `\` or `/`.
+///
+/// Case is preserved as typed — comparison is case-insensitive in
+/// `user_match`.
+pub fn normalize_user_entry(input: &str) -> Option<String> {
+    normalize_inner(input).ok()
+}
+
+/// Validate a user-supplied whitelist entry, returning the normalized form
+/// or a human-readable rejection reason (UI-SPEC backstop: error, not added).
+///
+/// The caller (w overlay add flow) treats the returned `Err` as "not added" —
+/// the entry never reaches `settings.toml`. A duplicate entry is detected by
+/// the caller via case-insensitive comparison against the existing list and
+/// is a no-op (never saved twice).
+pub fn validate_user_entry(input: &str) -> std::result::Result<String, String> {
+    let normalized = normalize_inner(input).map_err(|e| e.reason())?;
+    if std::fs::metadata(&normalized).is_err() {
+        return Err("Path does not exist".to_string());
+    }
+    Ok(normalized)
+}
+
+/// Internal normalization failure reason (keeps `normalize_user_entry`
+/// returning `Option` while `validate_user_entry` can explain itself).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum NormalizeError {
+    TooLong,
+    Empty,
+    ControlChar,
+    NotAbsolute,
+}
+
+impl NormalizeError {
+    fn reason(&self) -> String {
+        match self {
+            Self::TooLong => "Path is too long (max 4096)".to_string(),
+            Self::Empty => "Path is empty".to_string(),
+            Self::ControlChar => "Path contains control characters".to_string(),
+            Self::NotAbsolute => {
+                "Path must be absolute (C:\\... or \\\\server\\share\\...)".to_string()
+            }
+        }
+    }
+}
+
+/// Pure normalization shared by `normalize_user_entry` and
+/// `validate_user_entry` — the only non-pure step is the cfg-gated
+/// `GetLongPathNameW` 8.3 resolver, which touches no global state.
+fn normalize_inner(input: &str) -> std::result::Result<String, NormalizeError> {
+    if input.chars().count() > MAX_ENTRY_LEN {
+        return Err(NormalizeError::TooLong);
+    }
+    let trimmed = input.trim();
+    if trimmed.is_empty() {
+        return Err(NormalizeError::Empty);
+    }
+
+    // Strip ONE pair of surrounding double quotes, if present.
+    let s = if trimmed.starts_with('"') && trimmed.ends_with('"') && trimmed.len() >= 2 {
+        &trimmed[1..trimmed.len() - 1]
+    } else {
+        trimmed
+    };
+
+    if s.is_empty() {
+        return Err(NormalizeError::Empty);
+    }
+    if s.chars().any(|c| c.is_control()) {
+        return Err(NormalizeError::ControlChar);
+    }
+    if !is_absolute_path(s) {
+        return Err(NormalizeError::NotAbsolute);
+    }
+
+    let mut s = s.to_string();
+
+    // 8.3 resolution — only applies to existing files (the resolver returns
+    // None for nonexistent paths; validate_user_entry rejects them after).
+    #[cfg(target_os = "windows")]
+    {
+        if let Some(long) = resolve_long_path(&s) {
+            s = long;
+        }
+    }
+
+    // Strip one trailing '\' or '/'.
+    let s = s.trim_end_matches(['\\', '/']).to_string();
+    if s.is_empty() {
+        return Err(NormalizeError::Empty);
+    }
+    Ok(s)
+}
+
+/// Absolute-path syntax check: drive prefix (`C:\` or `C:/`) or UNC (`\\`).
+fn is_absolute_path(s: &str) -> bool {
+    let bytes = s.as_bytes();
+    if bytes.len() >= 3 && bytes[1] == b':' && (bytes[2] == b'\\' || bytes[2] == b'/') {
+        return bytes[0].is_ascii_alphabetic();
+    }
+    s.starts_with("\\\\")
+}
+
+/// Resolve 8.3 short names to the long form via `GetLongPathNameW`.
+///
+/// Returns `None` when the path does not exist (the Win32 call returns 0
+/// with ERROR_INVALID_PARAMETER / ERROR_FILE_NOT_FOUND) — the 8.3 resolver
+/// only applies to existing files. This is the one Win32 call in the
+/// module; callers must run inside `spawn_blocking` (CORE-01).
+#[cfg(target_os = "windows")]
+fn resolve_long_path(path: &str) -> Option<String> {
+    use windows::core::PCWSTR;
+    use windows::Win32::Storage::FileSystem::GetLongPathNameW;
+
+    let wide: Vec<u16> = path.encode_utf16().chain(std::iter::once(0)).collect();
+    let ptr = PCWSTR(wide.as_ptr());
+
+    // First call queries the required buffer size (0 = failure/nonexistent).
+    let required = unsafe { GetLongPathNameW(ptr, None) };
+    if required == 0 {
+        return None;
+    }
+    let mut buf = vec![0u16; required as usize];
+    let len = unsafe { GetLongPathNameW(ptr, Some(&mut buf)) };
+    if len == 0 {
+        return None;
+    }
+    Some(String::from_utf16_lossy(&buf[..len as usize]))
+}
+
 /// Normalize a path for comparison: trim, strip quotes, strip trailing separators.
 fn normalize_path(s: &str) -> String {
     let s = s.trim();
@@ -481,7 +625,9 @@ mod tests {
     #[test]
     fn normalize_resolves_8dot3_short_names() {
         // Create a long-named temp dir, get its 8.3 short form, and verify
-        // normalize_user_entry expands it back to the long form.
+        // normalize_user_entry expands it back to the long form. The dir
+        // must still EXIST when normalize runs — the 8.3 resolver only
+        // applies to existing files (GetLongPathNameW returns 0 otherwise).
         let long_dir = std::env::temp_dir().join(format!(
             "portunity-83-test-{}",
             std::process::id()
@@ -489,12 +635,15 @@ mod tests {
         std::fs::create_dir_all(&long_dir).unwrap();
         let long = long_dir.to_string_lossy().to_string();
         let short = short_path_for_test(&long);
+
+        // Normalize while the dir still exists (the 8.3 resolver only
+        // applies to existing files), then clean up.
+        let normalized = short.as_deref().and_then(normalize_user_entry);
         let _ = std::fs::remove_dir_all(&long_dir);
 
         if let Some(short) = short {
             if short != long {
-                let normalized = normalize_user_entry(&short)
-                    .expect("8.3 short path must normalize");
+                let normalized = normalized.expect("8.3 short path must normalize");
                 assert_eq!(normalized, long);
             }
         }
