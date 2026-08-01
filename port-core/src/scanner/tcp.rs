@@ -169,7 +169,6 @@ fn format_ipv4(addr: u32) -> String {
 ///
 /// If the address is an IPv4-mapped IPv6 address (`::ffff:a.b.c.d`),
 /// the `is_ipv4_mapped` flag is set to true so the caller can deduplicate.
-#[allow(dead_code)]
 fn format_ipv6(addr: &[u8; 16]) -> String {
     // Check for IPv4-mapped IPv6: first 10 bytes are 0, next 2 are 0xFF
     let is_mapped = addr[0..10].iter().all(|&b| b == 0)
@@ -237,9 +236,9 @@ fn format_ipv6(addr: &[u8; 16]) -> String {
             if best_start == 0 && best_len == 8 {
                 return "::".to_string();
             }
-            if best_start == 0 {
-                result = format!(":{}", result);
-            }
+            // A run starting at group 0 already yields a leading "::"
+            // (the compression push above) — prepending another colon
+            // would produce an invalid ":::…" (IN-02). No fix-up needed.
             result
         } else {
             groups.join(":")
@@ -309,6 +308,15 @@ fn connection_from_tcp6_row(
     } else {
         Some(remote_port_raw)
     };
+    // WR-06: populate the remote address like the IPv4 row does — None
+    // when there is no remote endpoint (listen rows), RFC 5952 string
+    // otherwise. Previously hardcoded None left TCP6 rows showing "—"
+    // while TCP4 rows showed the remote address.
+    let remote_addr = if remote_port_raw == 0 {
+        None
+    } else {
+        Some(format_ipv6(&row.ucRemoteAddr))
+    };
 
     let pid = row.dwOwningPid;
     let protocol = Protocol::Tcp6;
@@ -330,7 +338,7 @@ fn connection_from_tcp6_row(
             user_protected: false,
             parent_pid: None,
         },
-        remote_address: None,
+        remote_address: remote_addr,
         remote_port,
         bytes_sent: 0,
         bytes_received: 0,
@@ -435,4 +443,111 @@ pub(crate) fn resolve_process_names(pids: &[u32]) -> std::collections::HashMap<u
     }
 
     names
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Build a 16-byte IPv6 address from 8 big-endian groups.
+    fn ipv6(groups: [u16; 8]) -> [u8; 16] {
+        let mut out = [0u8; 16];
+        for (i, g) in groups.iter().enumerate() {
+            out[i * 2] = (g >> 8) as u8;
+            out[i * 2 + 1] = (g & 0xff) as u8;
+        }
+        out
+    }
+
+    #[test]
+    fn format_ipv6_loopback_no_extra_colon() {
+        // Regression for IN-02: the leading zero run must produce exactly
+        // one "::" — the old prepend branch emitted ":::1".
+        assert_eq!(format_ipv6(&ipv6([0, 0, 0, 0, 0, 0, 0, 1])), "::1");
+    }
+
+    #[test]
+    fn format_ipv6_all_zeros() {
+        assert_eq!(format_ipv6(&ipv6([0; 8])), "::");
+    }
+
+    #[test]
+    fn format_ipv6_leading_run_compressed() {
+        assert_eq!(format_ipv6(&ipv6([0, 0, 0, 0, 0, 1, 2, 3])), "::1:2:3");
+    }
+
+    #[test]
+    fn format_ipv6_trailing_run_compressed() {
+        assert_eq!(
+            format_ipv6(&ipv6([0x2001, 0xdb8, 1, 2, 0, 0, 0, 0])),
+            "2001:db8:1:2::"
+        );
+    }
+
+    #[test]
+    fn format_ipv6_middle_run_compressed() {
+        assert_eq!(
+            format_ipv6(&ipv6([0x2001, 0xdb8, 0, 0, 1, 0, 0, 1])),
+            "2001:db8::1:0:0:1"
+        );
+    }
+
+    #[test]
+    fn format_ipv6_no_compression() {
+        assert_eq!(
+            format_ipv6(&ipv6([
+                0x2001, 0xdb8, 0x85a3, 0x8d3, 0x1319, 0x8a2e, 0x370, 0x7334
+            ])),
+            "2001:db8:85a3:8d3:1319:8a2e:370:7334"
+        );
+    }
+
+    #[test]
+    fn format_ipv6_mapped_ipv4() {
+        let mut addr = [0u8; 16];
+        addr[10] = 0xff;
+        addr[11] = 0xff;
+        addr[12] = 192;
+        addr[13] = 0;
+        addr[14] = 2;
+        addr[15] = 1;
+        assert_eq!(format_ipv6(&addr), "::ffff:192.0.2.1");
+    }
+
+    /// Build a MIB_TCP6ROW_OWNER_PID row for tests.
+    #[cfg(target_os = "windows")]
+    fn tcp6_row(remote_port_raw: u32, remote_addr: [u8; 16], dw_state: u32) -> MIB_TCP6ROW_OWNER_PID {
+        MIB_TCP6ROW_OWNER_PID {
+            ucLocalAddr: [0; 16],
+            dwLocalScopeId: 0,
+            dwLocalPort: 80u32.to_be(),
+            ucRemoteAddr: remote_addr,
+            dwRemoteScopeId: 0,
+            dwRemotePort: remote_port_raw,
+            dwState: dw_state,
+            dwOwningPid: 1234,
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn tcp6_remote_address_populated_when_port_set() {
+        // Regression for WR-06: TCP6 rows must show the remote address
+        // (previously hardcoded None)...
+        let row = tcp6_row(443u32.to_be(), ipv6([0, 0, 0, 0, 0, 0, 0, 1]), 5);
+        let conn = connection_from_tcp6_row(&row, "test.exe");
+        assert_eq!(conn.remote_address.as_deref(), Some("::1"));
+        assert_eq!(conn.remote_port, Some(443));
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn tcp6_remote_address_none_when_port_zero() {
+        // ...and stay None for listen rows (dwRemotePort == 0), mirroring
+        // the IPv4 row's logic.
+        let row = tcp6_row(0, [0; 16], 2); // MIB_TCP_STATE_LISTEN = 2
+        let conn = connection_from_tcp6_row(&row, "test.exe");
+        assert_eq!(conn.remote_address, None);
+        assert_eq!(conn.remote_port, None);
+    }
 }
