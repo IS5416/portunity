@@ -2,8 +2,16 @@
 //!
 //! Reads and writes `%APPDATA%/Portunity/settings.toml`.
 //! Creates default settings on first run.
+//!
+//! `load_settings` is called on every scan and every kill, so it keeps a
+//! process-local cache invalidated by file mtime/size — unchanged files are
+//! served from memory (no per-scan disk read + TOML parse) while D-15's
+//! "changes take effect immediately" is preserved because every atomic save
+//! bumps the mtime, forcing one fresh re-read.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::sync::{Mutex, OnceLock};
+use std::time::SystemTime;
 
 /// Application settings persisted as TOML.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -56,13 +64,70 @@ pub fn settings_path() -> PathBuf {
     base.join("Portunity").join("settings.toml")
 }
 
+/// A cached copy of the last parsed settings plus the filesystem fingerprint
+/// that identifies it. When the on-disk file's (mtime, size) still match, the
+/// cached copy is returned without re-reading.
+struct CachedSettings {
+    modified: Option<SystemTime>,
+    len: Option<u64>,
+    settings: AppSettings,
+}
+
+impl CachedSettings {
+    fn matches(&self, meta: &std::fs::Metadata) -> bool {
+        meta.modified().ok() == self.modified && Some(meta.len()) == self.len
+    }
+}
+
+/// Process-local settings cache. Holds at most one entry; guard handles
+/// concurrent access (TUI event loop + the callers that live in spawn_blocking).
+fn settings_cache() -> &'static Mutex<Option<CachedSettings>> {
+    static CACHE: OnceLock<Mutex<Option<CachedSettings>>> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(None))
+}
+
 /// Load settings from the TOML file, creating defaults if the file is missing.
 ///
 /// If the file exists but cannot be parsed, logs a warning and returns defaults
-/// so the application can still run.
+/// so the application can still run. Results are cached by (mtime, size) — an
+/// unchanged file is served from memory instead of re-read + re-parsed on every
+/// scan/kill; a save (which bumps the mtime) forces a fresh re-read, preserving
+/// D-15's "whitelist changes take effect immediately".
 pub fn load_settings() -> crate::Result<AppSettings> {
     let path = settings_path();
 
+    // Fast path: cached copy still matches the file on disk.
+    {
+        let guard = settings_cache()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(cached) = guard.as_ref()
+            && let Ok(meta) = std::fs::metadata(&path)
+            && cached.matches(&meta)
+        {
+            return Ok(cached.settings.clone());
+        }
+    }
+
+    // Slow path: read (or create) + parse, then refresh the cache with the
+    // just-stat'd fingerprint so the cached entry is immediately valid.
+    let settings = load_from_disk(&path)?;
+    if let Ok(meta) = std::fs::metadata(&path) {
+        let cached = CachedSettings {
+            modified: meta.modified().ok(),
+            len: Some(meta.len()),
+            settings: settings.clone(),
+        };
+        let mut guard = settings_cache()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        *guard = Some(cached);
+    }
+    Ok(settings)
+}
+
+/// Read + parse (or create-on-first-run) a settings file.
+fn load_from_disk(path: &Path) -> crate::Result<AppSettings> {
     if !path.exists() {
         // Create parent directory and write defaults
         if let Some(parent) = path.parent() {
@@ -79,7 +144,7 @@ pub fn load_settings() -> crate::Result<AppSettings> {
         return Ok(defaults);
     }
 
-    let content = std::fs::read_to_string(&path)?;
+    let content = std::fs::read_to_string(path)?;
 
     match toml::from_str::<AppSettings>(&content) {
         Ok(settings) => Ok(settings),
@@ -95,9 +160,13 @@ pub fn load_settings() -> crate::Result<AppSettings> {
     }
 }
 
-/// Save settings to the TOML file.
+/// Save settings to the TOML file atomically.
 ///
-/// Creates the parent directory if it does not exist.
+/// Writes to a same-directory temp file then renames over the target, so a
+/// crash mid-write can never leave a truncated/corrupt `settings.toml` (one
+/// that would silently reset the whitelist to defaults on next load — the
+/// review's non-atomic `fs::write` window). Creates the parent directory if
+/// it does not exist. The rename bumps the mtime, invalidating the cache.
 pub fn save_settings(settings: &AppSettings) -> crate::Result<()> {
     let path = settings_path();
 
@@ -109,7 +178,14 @@ pub fn save_settings(settings: &AppSettings) -> crate::Result<()> {
         crate::Error::Io(std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))
     })?;
 
-    std::fs::write(&path, toml_str)?;
+    let dir = path.parent().unwrap_or_else(|| Path::new("."));
+    let name = path.file_name().unwrap_or_default().to_string_lossy();
+    // Unique temp name (pid-suffixed) avoids clobbering a concurrent frontend's
+    // in-flight write while we prepare ours.
+    let tmp = dir.join(format!(".{}.tmp{}", name, std::process::id()));
+
+    std::fs::write(&tmp, &toml_str)?;
+    std::fs::rename(&tmp, &path)?;
 
     Ok(())
 }
@@ -178,5 +254,49 @@ schema_version = 1
         assert_eq!(round_tripped.whitelist.len(), 2);
         assert_eq!(round_tripped.whitelist[0], "C:\\foo.exe");
         assert_eq!(round_tripped.whitelist[1], "C:\\foo.exe");
+    }
+
+    /// Save is atomic (no temp file left behind) and `save_settings` is
+    /// immediately visible to `load_settings` (D-15 instant effect, now via
+    /// the mtime-invalidated cache). Redirects APPDATA to a private temp dir.
+    #[test]
+    fn save_is_atomic_and_load_sees_it_immediately() {
+        let dir = std::env::temp_dir().join(format!(
+            "portunity-settings-test-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        // edition-2024: env mutation is `unsafe`.
+        unsafe { std::env::set_var("APPDATA", &dir) };
+
+        // Create-on-first-run + write.
+        save_settings(&default_settings()).unwrap();
+
+        let entries = std::fs::read_dir(dir.join("Portunity"))
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .collect::<Vec<_>>();
+        assert!(
+            entries.iter().any(|n| n == "settings.toml"),
+            "settings.toml missing: {entries:?}"
+        );
+        assert!(
+            entries.iter().all(|n| !n.contains(".tmp")),
+            "temp file leaked by atomic save: {entries:?}"
+        );
+
+        // A change is visible to the next load — the cache is invalidated by
+        // the save's fresh mtime.
+        let mut changed = default_settings();
+        changed.kill_timeout_secs = 42;
+        changed.whitelist.push(r"C:\apps\node.exe".to_string());
+        save_settings(&changed).unwrap();
+        let reloaded = load_settings().unwrap();
+        assert_eq!(reloaded.kill_timeout_secs, 42);
+        assert_eq!(reloaded.whitelist, vec![r"C:\apps\node.exe".to_string()]);
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
