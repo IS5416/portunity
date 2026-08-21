@@ -24,65 +24,93 @@ use crate::models::{Connection, Filter};
 /// - `system_only`: if Some(true), only system-critical processes; if Some(false), only non-system
 /// - `remote_only`: if Some(true), only connections with remote address; if Some(false), only without
 /// - `favorite_only`: reserved for Phase 6 (currently pass-all)
+///
+/// Perf (review): the previous version cloned the whole list up front and
+/// lowercased every filter term + every row name on each retain pass (~10k
+/// small allocations per apply at 2000 rows x 5 terms). This version
+/// precomputes the lowercased filter terms once, works on surviving indices,
+/// and clones only the survivors.
 pub fn apply_filters(connections: &[Connection], filter: &Filter) -> Vec<Connection> {
-    let mut result: Vec<Connection> = connections.to_vec();
+    // Precompute case-insensitive process-name filter terms once (not per row).
+    let process_terms: Vec<String> = filter
+        .process_names
+        .iter()
+        .map(|n| n.to_lowercase())
+        .collect();
 
-    // --- Port range filter ---
-    if let Some((min, max)) = filter.port_range {
-        result.retain(|c| c.port.number >= min && c.port.number <= max);
-    }
+    // Work on indices so no row is cloned until it survives every dimension.
+    let mut keep: Vec<usize> = (0..connections.len()).collect();
 
-    // --- Protocol filter (OR within Vec) ---
-    if !filter.protocols.is_empty() {
-        result.retain(|c| filter.protocols.iter().any(|p| c.port.protocol == *p));
-    }
-
-    // --- Process name filter: case-insensitive substring match (OR within Vec) ---
-    if !filter.process_names.is_empty() {
-        result.retain(|c| {
+    keep.retain(|&i| {
+        let c = &connections[i];
+        if let Some((min, max)) = filter.port_range {
+            if c.port.number < min || c.port.number > max {
+                return false;
+            }
+        }
+        if !filter.protocols.is_empty() && !filter.protocols.iter().any(|p| c.port.protocol == *p) {
+            return false;
+        }
+        if !process_terms.is_empty() {
             let name_lower = c.process.name.to_lowercase();
-            filter
-                .process_names
-                .iter()
-                .any(|n| name_lower.contains(&n.to_lowercase()))
-        });
-    }
+            if !process_terms.iter().any(|t| name_lower.contains(t.as_str())) {
+                return false;
+            }
+        }
+        if !filter.pids.is_empty() && !filter.pids.iter().any(|pid| c.process.pid == *pid) {
+            return false;
+        }
+        if !filter.states.is_empty() && !filter.states.iter().any(|s| c.port.state == *s) {
+            return false;
+        }
+        true
+    });
 
-    // --- PID filter (OR within Vec) ---
-    if !filter.pids.is_empty() {
-        result.retain(|c| filter.pids.iter().any(|pid| c.process.pid == *pid));
-    }
-
-    // --- State filter (OR within Vec) ---
-    if !filter.states.is_empty() {
-        result.retain(|c| filter.states.iter().any(|s| c.port.state == *s));
-    }
-
-    // --- Fuzzy search text ---
+    // --- Fuzzy search text (lowercased query precomputed once) ---
     if let Some(ref query) = filter.search_text {
-        if !query.trim().is_empty() {
-            result = fuzzy_search(&result, query);
+        let q = query.trim().to_lowercase();
+        if !q.is_empty() {
+            keep.retain(|&i| searchable(&connections[i]).contains(&q));
         }
     }
 
-    // --- System-only filter ---
-    if let Some(system_only) = filter.system_only {
-        result.retain(|c| c.process.is_system_critical == system_only);
-    }
-
-    // --- Remote-only filter ---
-    if let Some(remote_only) = filter.remote_only {
-        if remote_only {
-            result.retain(|c| c.remote_address.is_some());
-        } else {
-            result.retain(|c| c.remote_address.is_none());
+    // --- System-only + remote-only filters ---
+    keep.retain(|&i| {
+        let c = &connections[i];
+        if let Some(system_only) = filter.system_only
+            && c.process.is_system_critical != system_only
+        {
+            return false;
         }
-    }
+        if let Some(remote_only) = filter.remote_only
+            && (c.remote_address.is_some() != remote_only)
+        {
+            return false;
+        }
+        true
+    });
 
     // --- Favorite-only filter (reserved, currently pass-all) ---
     // Phase 6 will integrate with the favorites database.
 
-    result
+    // Clone only the survivors.
+    keep.into_iter().map(|i| connections[i].clone()).collect()
+}
+
+/// Build the lowercased, searchable concatenation of a connection's fields.
+///
+/// Shared by `fuzzy_search` and the `search_text` dimension so the string is
+/// built once per candidate row per apply (not re-lowercased repeatedly).
+fn searchable(c: &Connection) -> String {
+    format!(
+        "{} {} {} {:?} {:?}",
+        c.port.number,
+        c.process.name,
+        c.process.pid,
+        c.port.protocol,
+        c.port.state
+    )
+    .to_lowercase()
 }
 
 /// Fuzzy search across all connection fields.
@@ -103,19 +131,7 @@ pub fn fuzzy_search(connections: &[Connection], query: &str) -> Vec<Connection> 
 
     connections
         .iter()
-        .filter(|c| {
-            let searchable = format!(
-                "{} {} {} {:?} {:?}",
-                c.port.number,
-                c.process.name,
-                c.process.pid,
-                c.port.protocol,
-                c.port.state
-            )
-            .to_lowercase();
-
-            searchable.contains(&query)
-        })
+        .filter(|c| searchable(c).contains(&query))
         .cloned()
         .collect()
 }
