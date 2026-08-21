@@ -3,8 +3,8 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: in_progress
-stopped_at: Completed 02-03-PLAN.md (whitelist overlay + Help overlay)
-last_updated: "2026-08-01T11:40:00.000Z"
+stopped_at: Agent takeover: GSD-lite mode; Phase 2 UAT deferred (known risk); review groundwork in flight
+last_updated: "2026-08-20T09:38:12.000Z"
 progress:
   total_phases: 2
   completed_phases: 1
@@ -120,6 +120,14 @@ current_phase_name: Process Management & Smart Kill
 | Phase 02-process-management-smart-kill P02-03 | 41m | 2 tasks | 12 files |
 
 ## Session Continuity
+
+**Session 2026-08-20 Batch A (code review groundwork — COMPLETE):** Audit-driven hardening landed as 7 atomic commits: `b2d1bef` (single sysinfo refresh + resolve in spawn_blocking + dedup by pid), `fc9b1eb` (filter: no full-list clone, precomputed terms), `7cd0148` (settings mtime cache + atomic save), `9ec0574` (fail closed on None creation-time kill; saturate timeout), `4b6b9a0` (confirm dispatch beats search/filter; ElevateFailed resets guard), `1521cbf` (Connection.local_address + serde derives), `113bd05` (route_strategy wired; KillExecute removed). New tests: settings atomic-save, open_verified None-creation-time refusal, kill timeout saturation, map_key_event dispatch (3). Full 4 reviews in `.planning/review/`.
+
+**Deferred to Batch B / Phase 3 (documented decisions):** (a) `spawn_kill` shared-task extraction + `main.rs` module split — Batch B refactor (touches untested drain-arm paths); (b) scan-time `start_time` population — D-16 cost tradeoff, decide in Phase 3; (c) the 2 kill_integration tests `test_graceful_console_child`/`test_timeout_then_force` are KNOWN-FLAKY at their `wait_for_exit` PID-polling assertion (02-VERIFICATION carry-forward) — reproduced identically WITHOUT these changes; harden the harness in Phase 3.
+
+**Prior takeover record (2026-08-20):** Decisions: GSD-lite (keep `.planning` + review/verify gates, streamline ceremony); Phase 2's 5 manual-UAT items deferred as known risk (auto-verification passed 22/29; interactive items in `02-VERIFICATION.md` Human Verification section), backfill after Phase 3; gsd-core synced diff-only (v1.8.0), no replace — installed skills are adapter-wrapped targeting missing `~/.codex/gsd-core`, Claude-side install is v1.10.0 at `~/.claude/gsd-core`.
+
+**Next action:** Phase 3 planning — start with ferrisetw transitive-dependency verification (windows 0.62 vs STACK.md's 0.73/ferrisetw 1.2.0) before committing to `monitor/etw.rs`; then Wave 3.1 (EventBus + ETW + 2s poll) per `.planning/review/REVIEW-phase3-readiness.md`.
 
 **Last session:** 2026-08-01T11:40:00Z
 **Stopped at:** Completed 02-03-PLAN.md (whitelist overlay + Help overlay)
