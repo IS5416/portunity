@@ -252,10 +252,10 @@ fn is_ipv4_mapped(addr: &[u8; 16]) -> bool {
 }
 
 /// Build a Connection from MIB_TCPROW_OWNER_PID (IPv4 row).
-fn connection_from_tcp_row(
-    row: &MIB_TCPROW_OWNER_PID,
-    process_name: &str,
-) -> Connection {
+///
+/// Process name is left empty — `scan_all` batch-resolves names via
+/// `ProcessResolver` and fills them in (single sysinfo refresh, D-16).
+fn connection_from_tcp_row(row: &MIB_TCPROW_OWNER_PID) -> Connection {
     let local_port = unsafe { ntohs(row.dwLocalPort as u16) };
     let remote_port_raw = unsafe { ntohs(row.dwRemotePort as u16) };
     let remote_port = if remote_port_raw == 0 {
@@ -280,7 +280,7 @@ fn connection_from_tcp_row(
         },
         process: ProcessInfo {
             pid,
-            name: process_name.to_string(),
+            name: String::new(),
             executable_path: None,
             command_line: None,
             start_time: None,
@@ -297,10 +297,9 @@ fn connection_from_tcp_row(
 }
 
 /// Build a Connection from MIB_TCP6ROW_OWNER_PID (IPv6 row).
-fn connection_from_tcp6_row(
-    row: &MIB_TCP6ROW_OWNER_PID,
-    process_name: &str,
-) -> Connection {
+///
+/// Process name is left empty — resolved by `scan_all` (see above).
+fn connection_from_tcp6_row(row: &MIB_TCP6ROW_OWNER_PID) -> Connection {
     let local_port = unsafe { ntohs(row.dwLocalPort as u16) };
     let remote_port_raw = unsafe { ntohs(row.dwRemotePort as u16) };
     let remote_port = if remote_port_raw == 0 {
@@ -329,7 +328,7 @@ fn connection_from_tcp6_row(
         },
         process: ProcessInfo {
             pid,
-            name: process_name.to_string(),
+            name: String::new(),
             executable_path: None,
             command_line: None,
             start_time: None,
@@ -348,10 +347,13 @@ fn connection_from_tcp6_row(
 /// Scan all active TCP ports on the local machine (dual-stack).
 ///
 /// Per D-02: calls both AF_INET and AF_INET6 tables, merges results,
-/// and deduplicates IPv4-mapped IPv6 entries. Process name resolution
-/// is handled externally by `scan_all()` in the scanner module.
+/// and deduplicates IPv4-mapped IPv6 entries.
 ///
-/// Returns (connections, unique_pids) for batch process resolution.
+/// Returns raw connections (process names EMPTY) + unique PIDs for batch
+/// process resolution. Name resolution is the single responsibility of
+/// `scanner::scan_all` — doing it here as well meant two full sysinfo
+/// refreshes per combined scan, both discarded when scan_all re-resolved.
+#[doc = "Per Pitfall #9 all blocking Win32 calls run in `spawn_blocking`."]
 pub async fn scan_tcp() -> crate::Result<(Vec<Connection>, Vec<u32>)> {
     tokio::task::spawn_blocking(move || {
         // Scan both address families
@@ -367,42 +369,36 @@ pub async fn scan_tcp() -> crate::Result<(Vec<Connection>, Vec<u32>)> {
         pid_set.sort_unstable();
         pid_set.dedup();
 
-        // Resolve process names (inline for now — caller will use ProcessResolver)
-        let names = resolve_process_names(&pid_set);
-
-        // Build IPv4 connections
+        // Build IPv4 connections (names filled by scan_all)
         let mut connections: Vec<Connection> = v4_rows
             .iter()
-            .map(|row| {
-                let pid = row.dwOwningPid;
-                let name = names.get(&pid).cloned().unwrap_or_else(|| "<unknown>".to_string());
-                connection_from_tcp_row(row, &name)
-            })
+            .map(connection_from_tcp_row)
             .collect();
 
         // Build IPv6 connections, deduplicating IPv4-mapped entries (D-02)
-        let mut seen: HashSet<(u16, Protocol)> = connections
+        let mut seen: HashSet<(u16, Protocol, u32)> = connections
             .iter()
-            .map(|c| (c.port.number, c.port.protocol))
+            .map(|c| (c.port.number, c.port.protocol, c.process.pid))
             .collect();
 
         for row in &v6_rows {
             let local_port = unsafe { ntohs(row.dwLocalPort as u16) };
 
             // D-02: an IPv4-mapped IPv6 address represents the same endpoint.
-            // Keep the AF_INET entry (canonical), drop the IPv4-mapped Tcp6 duplicate.
+            // Keep the AF_INET entry (canonical), drop the IPv4-mapped Tcp6
+            // duplicate. Key on (port, protocol, PID): a PID-0 TIME_WAIT v4 row
+            // must NOT suppress a different process's mapped-v6 listener on the
+            // same port (review: dedup key ignores process identity).
             if is_ipv4_mapped(&row.ucLocalAddr) {
-                let key = (local_port, Protocol::Tcp);
+                let key = (local_port, Protocol::Tcp, row.dwOwningPid);
                 if seen.contains(&key) {
-                    // Already have the AF_INET version — skip this duplicate.
+                    // Already have the AF_INET version for this PID — skip.
                     continue;
                 }
             }
 
-            let pid = row.dwOwningPid;
-            let name = names.get(&pid).cloned().unwrap_or_else(|| "<unknown>".to_string());
-            let conn = connection_from_tcp6_row(row, &name);
-            seen.insert((conn.port.number, conn.port.protocol));
+            let conn = connection_from_tcp6_row(row);
+            seen.insert((conn.port.number, conn.port.protocol, conn.process.pid));
             connections.push(conn);
         }
 
@@ -410,39 +406,6 @@ pub async fn scan_tcp() -> crate::Result<(Vec<Connection>, Vec<u32>)> {
     })
     .await
     .map_err(|e| crate::Error::Platform(format!("spawn_blocking failed: {}", e)))?
-}
-
-/// Resolve process names from a set of PIDs using sysinfo.
-///
-/// Used internally by scan_tcp. The standalone ProcessResolver in resolver.rs
-/// provides a more efficient batched approach for multi-protocol scans.
-pub(crate) fn resolve_process_names(pids: &[u32]) -> std::collections::HashMap<u32, String> {
-    use sysinfo::{Pid, System};
-
-    let mut system = System::new_all();
-    system.refresh_all();
-
-    let mut names = std::collections::HashMap::new();
-
-    for &pid in pids {
-        if pid == 0 {
-            names.insert(pid, "System Idle Process".to_string());
-            continue;
-        }
-        if pid == 4 {
-            names.insert(pid, "System".to_string());
-            continue;
-        }
-
-        let name = system
-            .process(Pid::from(pid as usize))
-            .map(|p| p.name().to_string_lossy().to_string())
-            .unwrap_or_else(|| "<unknown>".to_string());
-
-        names.insert(pid, name);
-    }
-
-    names
 }
 
 #[cfg(test)]
@@ -539,7 +502,7 @@ mod tests {
         // Regression for WR-06: TCP6 rows must show the remote address
         // (previously hardcoded None)...
         let row = tcp6_row(443, ipv6([0, 0, 0, 0, 0, 0, 0, 1]), 5);
-        let conn = connection_from_tcp6_row(&row, "test.exe");
+        let conn = connection_from_tcp6_row(&row);
         assert_eq!(conn.remote_address.as_deref(), Some("::1"));
         assert_eq!(conn.remote_port, Some(443));
     }
@@ -550,7 +513,7 @@ mod tests {
         // ...and stay None for listen rows (dwRemotePort == 0), mirroring
         // the IPv4 row's logic.
         let row = tcp6_row(0, [0; 16], 2); // MIB_TCP_STATE_LISTEN = 2
-        let conn = connection_from_tcp6_row(&row, "test.exe");
+        let conn = connection_from_tcp6_row(&row);
         assert_eq!(conn.remote_address, None);
         assert_eq!(conn.remote_port, None);
     }

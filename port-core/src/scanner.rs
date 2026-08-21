@@ -40,7 +40,9 @@ pub trait PortScanner: Send + Sync {
 /// Per D-16: collects all unique PIDs, resolves process names in a single
 /// batch via `ProcessResolver`. Wall-clock time = max(TCP_scan, UDP_scan).
 pub async fn scan_all() -> crate::Result<Vec<Connection>> {
-    // Concurrent TCP + UDP scan (D-04)
+    // Concurrent TCP + UDP scan (D-04). Each protocol scan already runs in
+    // its own `spawn_blocking` (Pitfall #9) and returns RAW connections
+    // (process names left empty — see below) plus the unique PIDs it touched.
     let (tcp_result, udp_result) = tokio::join!(scan_tcp(), scan_udp());
 
     let (mut tcp_conns, tcp_pids) = tcp_result?;
@@ -55,34 +57,44 @@ pub async fn scan_all() -> crate::Result<Vec<Connection>> {
     all_pids.sort_unstable();
     all_pids.dedup();
 
-    // Resolve process names for all PIDs
-    let mut resolver = ProcessResolver::new();
-    resolver.resolve_batch(&all_pids)?;
+    // One spawn_blocking scope (Pitfall #9 / AS-3): batch name resolution,
+    // name application, and the protection marker post-pass all happen here,
+    // off the async worker. Per-scan costs:
+    //   - a SINGLE sysinfo refresh (D-16 honored) — the raw protocol scans no
+    //     longer resolve names themselves (the two discarded refreshes are gone),
+    //   - the settings file + TOML parse + protection markers read once.
+    // Previously the resolve step ran sysinfo directly on the tokio worker
+    // (async-runtime stall, multiplied by Phase 3's ETW-triggered scans) and the
+    // post-pass lived in a separate scope. Now there is exactly one blocking
+    // scope owning all post-scan work.
+    tokio::task::spawn_blocking(move || {
+        let mut resolver = ProcessResolver::new();
+        resolver.resolve_batch(&all_pids)?;
 
-    // Apply resolved names to all connections
-    for conn in &mut tcp_conns {
-        let pid = conn.process.pid;
-        if let Some(name) = resolver.get(pid) {
-            conn.process.name = name.to_string();
+        // Apply resolved names to all connections.
+        for conn in &mut tcp_conns {
+            if let Some(name) = resolver.get(conn.process.pid) {
+                conn.process.name = name.to_string();
+            }
         }
-    }
 
-    // Protection marker post-pass (RESEARCH Pattern 4, plan 02-02 Task 1):
-    // built-in basename match -> is_system_critical; user-entry basename
-    // match -> QueryFullProcessImageNameW -> user_match -> user_protected.
-    // One spawn_blocking scope (Pitfall #9) with fresh settings (D-15).
-    // This keeps filter.rs's `system_only` filter truthful and feeds the
-    // ◆ table markers at render time (O(1) per row — no per-row OpenProcess).
-    let conns = tokio::task::spawn_blocking(move || {
+        // Protection marker post-pass (RESEARCH Pattern 4, plan 02-02 Task 1):
+        // built-in basename match -> is_system_critical; user-entry basename
+        // match -> QueryFullProcessImageNameW -> user_match -> user_protected.
+        // Fresh settings (D-15). Keeps filter.rs's `system_only` filter truthful
+        // and feeds the ◆ table markers at render time (O(1) per row).
         let settings =
             crate::config::load_settings().unwrap_or_else(|_| crate::config::default_settings());
-        apply_protection_postpass(&mut tcp_conns, &settings, crate::process::info::query_full_path);
-        tcp_conns
+        apply_protection_postpass(
+            &mut tcp_conns,
+            &settings,
+            crate::process::info::query_full_path,
+        );
+
+        Ok::<Vec<Connection>, crate::Error>(tcp_conns)
     })
     .await
-    .map_err(|e| crate::Error::Platform(format!("spawn_blocking join error: {}", e)))?;
-
-    Ok(conns)
+    .map_err(|e| crate::Error::Platform(format!("spawn_blocking join error: {}", e)))?
 }
 
 /// Apply scan-time protection markers (RESEARCH Pattern 4).

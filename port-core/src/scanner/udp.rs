@@ -130,10 +130,10 @@ fn is_ipv4_mapped(addr: &[u8; 16]) -> bool {
 }
 
 /// Build a Connection from MIB_UDPROW_OWNER_PID (IPv4 row, no remote info).
-fn connection_from_udp_row(
-    row: &MIB_UDPROW_OWNER_PID,
-    process_name: &str,
-) -> Connection {
+///
+/// Process name is left empty — `scan_all` batch-resolves names via
+/// `ProcessResolver` (single sysinfo refresh, D-16).
+fn connection_from_udp_row(row: &MIB_UDPROW_OWNER_PID) -> Connection {
     let local_port = unsafe { ntohs(row.dwLocalPort as u16) };
     let pid = row.dwOwningPid;
 
@@ -145,7 +145,7 @@ fn connection_from_udp_row(
         },
         process: ProcessInfo {
             pid,
-            name: process_name.to_string(),
+            name: String::new(),
             executable_path: None,
             command_line: None,
             start_time: None,
@@ -162,10 +162,9 @@ fn connection_from_udp_row(
 }
 
 /// Build a Connection from MIB_UDP6ROW_OWNER_PID (IPv6 row, no remote info).
-fn connection_from_udp6_row(
-    row: &MIB_UDP6ROW_OWNER_PID,
-    process_name: &str,
-) -> Connection {
+///
+/// Process name is left empty — resolved by `scan_all` (see above).
+fn connection_from_udp6_row(row: &MIB_UDP6ROW_OWNER_PID) -> Connection {
     let local_port = unsafe { ntohs(row.dwLocalPort as u16) };
     let pid = row.dwOwningPid;
 
@@ -177,7 +176,7 @@ fn connection_from_udp6_row(
         },
         process: ProcessInfo {
             pid,
-            name: process_name.to_string(),
+            name: String::new(),
             executable_path: None,
             command_line: None,
             start_time: None,
@@ -198,7 +197,11 @@ fn connection_from_udp6_row(
 /// Per SCAN-02: calls GetExtendedUdpTable for both AF_INET and AF_INET6,
 /// merges results with IPv4-mapped IPv6 deduplication.
 ///
-/// Returns (connections, unique_pids) for batch process resolution.
+/// Returns raw connections (process names EMPTY) + unique PIDs for batch
+/// process resolution. Name resolution is the single responsibility of
+/// `scanner::scan_all` (single sysinfo refresh, D-16) — resolving here as
+/// well cost a second full refresh that scan_all then discarded.
+#[doc = "Per Pitfall #9 all blocking Win32 calls run in `spawn_blocking`."]
 pub async fn scan_udp() -> crate::Result<(Vec<Connection>, Vec<u32>)> {
     tokio::task::spawn_blocking(move || {
         let v4_rows = scan_udp_table_raw()?;
@@ -213,46 +216,33 @@ pub async fn scan_udp() -> crate::Result<(Vec<Connection>, Vec<u32>)> {
         pid_set.sort_unstable();
         pid_set.dedup();
 
-        // Resolve process names
-        let names = super::tcp::resolve_process_names(&pid_set);
-
-        // Build IPv4 connections
+        // Build IPv4 connections (names filled by scan_all)
         let mut connections: Vec<Connection> = v4_rows
             .iter()
-            .map(|row| {
-                let pid = row.dwOwningPid;
-                let name = names
-                    .get(&pid)
-                    .cloned()
-                    .unwrap_or_else(|| "<unknown>".to_string());
-                connection_from_udp_row(row, &name)
-            })
+            .map(connection_from_udp_row)
             .collect();
 
-        // Deduplicate: track seen (port, Protocol::Udp) pairs
-        let mut seen: HashSet<(u16, Protocol)> = connections
+        // Deduplicate: track seen (port, protocol, pid) triples
+        let mut seen: HashSet<(u16, Protocol, u32)> = connections
             .iter()
-            .map(|c| (c.port.number, c.port.protocol))
+            .map(|c| (c.port.number, c.port.protocol, c.process.pid))
             .collect();
 
-        // Build IPv6 connections, deduplicating IPv4-mapped entries (D-02)
+        // Build IPv6 connections, deduplicating IPv4-mapped entries (D-02).
+        // Key on (port, protocol, PID): a PID-0 row for a port must not
+        // suppress a different process's mapped-v6 endpoint on the same port.
         for row in &v6_rows {
             let local_port = unsafe { ntohs(row.dwLocalPort as u16) };
 
             if is_ipv4_mapped(&row.ucLocalAddr) {
-                let key = (local_port, Protocol::Udp);
+                let key = (local_port, Protocol::Udp, row.dwOwningPid);
                 if seen.contains(&key) {
                     continue;
                 }
             }
 
-            let pid = row.dwOwningPid;
-            let name = names
-                .get(&pid)
-                .cloned()
-                .unwrap_or_else(|| "<unknown>".to_string());
-            let conn = connection_from_udp6_row(row, &name);
-            seen.insert((conn.port.number, conn.port.protocol));
+            let conn = connection_from_udp6_row(row);
+            seen.insert((conn.port.number, conn.port.protocol, conn.process.pid));
             connections.push(conn);
         }
 
