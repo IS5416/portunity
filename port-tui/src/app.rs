@@ -33,6 +33,15 @@ pub enum KillTone {
     Error,
 }
 
+/// Live-refresh mode (Phase 3, SCAN-05) — drives the status-bar live label.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LiveMode {
+    /// ETW change-trigger is not active; the 2s poller drives refreshes.
+    Polling,
+    /// ETW change-trigger is live (future: set when `monitor::etw` lands).
+    Etw,
+}
+
 /// Focus target inside the whitelist overlay (UI-SPEC Focus Management).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WhitelistFocus {
@@ -89,8 +98,8 @@ pub struct App {
     /// Index of the selected row (0-based).
     pub selected_index: usize,
 
-    /// Timestamp of the last auto-refresh (for 5s interval).
-    pub last_auto_refresh: Option<Instant>,
+    /// Live-refresh mode shown in the status bar (Phase 3).
+    pub live_mode: LiveMode,
 
     // --- Search state ---
 
@@ -240,7 +249,7 @@ impl App {
             sort_column: SortColumn::Port,
             sort_order: SortOrder::Ascending,
             selected_index: 0,
-            last_auto_refresh: None,
+            live_mode: LiveMode::Polling,
             search_query: String::new(),
             search_active: false,
             search_cursor_pos: 0,

@@ -33,7 +33,6 @@ pub fn update(app: &mut App, msg: Message) {
             app.scanning = false;
             app.error = None;
             app.last_scan_time = Some(Instant::now());
-            app.last_auto_refresh = Some(Instant::now());
             // Re-apply active search or filter to new data
             if app.search_active && !app.search_query.is_empty() {
                 app.filtered_ports = filter::fuzzy_search(&app.ports, &app.search_query);

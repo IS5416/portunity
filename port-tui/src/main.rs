@@ -30,7 +30,7 @@ use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::Paragraph;
 use ratatui::{Frame, Terminal};
 
-use app::{App, KillTone, WhitelistFocus};
+use app::{App, KillTone, LiveMode, WhitelistFocus};
 use components::{
     Component, DetailPanelComponent, FilterPanelComponent, FirewallTabComponent,
     HelpComponent, HistoryTabComponent, KillConfirmComponent, OverviewComponent,
@@ -43,8 +43,12 @@ use update::update;
 use port_core::process::Protection;
 use port_core::scanner::PortScanner;
 
-/// Auto-refresh interval in seconds (D-11).
-const AUTO_REFRESH_INTERVAL: Duration = Duration::from_secs(5);
+// Phase 3 (CORE-03/SCAN-05): EventBus + monitor wiring for live refresh.
+use port_core::events::{CoreEvent, EventBus};
+use port_core::monitor::spawn_poller;
+
+// (The former 5s AUTO_REFRESH_INTERVAL is removed — the Phase 3 poller
+// (monitor::DEFAULT_POLL_INTERVAL, 2s) drives live refresh via PollTick.)
 
 /// CLI arguments for the TUI binary.
 #[derive(Parser)]
@@ -85,6 +89,15 @@ async fn main() -> Result<()> {
     let mut app = App::new();
     let theme = theme::default_theme();
 
+    // Phase 3 (SCAN-05): EventBus + 2s poller drive live refresh. The TUI
+    // subscribes; bus events (PollTick, future NetworkChanged/LiveMode) are
+    // converted to mpsc Messages in the event loop below. When the ETW
+    // change-trigger lands, it becomes the primary driver and the poller
+    // degrades to the fallback cadence (UDP/edge cases).
+    let bus = EventBus::new();
+    spawn_poller(bus.clone(), port_core::monitor::DEFAULT_POLL_INTERVAL);
+    let mut bus_rx = bus.subscribe();
+
     // Admin check at startup (D-09: run once, result persists for session)
     let is_admin = elevate::is_admin();
     let _ = tx.send(Message::AdminCheck(is_admin));
@@ -102,6 +115,7 @@ async fn main() -> Result<()> {
         &theme,
         &tx,
         &mut rx,
+        &mut bus_rx,
         &mut scan_spawned,
     );
 
@@ -208,6 +222,7 @@ fn run_event_loop(
     theme: &Theme,
     tx: &tokio::sync::mpsc::UnboundedSender<Message>,
     rx: &mut tokio::sync::mpsc::UnboundedReceiver<Message>,
+    bus_rx: &mut tokio::sync::broadcast::Receiver<CoreEvent>,
     scan_spawned: &mut bool,
 ) -> Result<()> {
     // Minimum interval between forced renders (clock update, 1 Hz).
@@ -233,6 +248,29 @@ fn run_event_loop(
 
         if app.should_quit {
             break;
+        }
+
+        // Phase 3 (SCAN-05): drain bus events. The poller publishes PollTick
+        // every 2s, which triggers a rescan here (respecting the in-flight
+        // guard — same posture as the 5s auto-refresh it replaces). Future
+        // NetworkChanged (ETW trigger) and LiveMode events land in this match
+        // too, so the TUI never needs to know how the trigger is produced.
+        while let Ok(evt) = bus_rx.try_recv() {
+            match evt {
+                CoreEvent::PollTick => {
+                    if !app.scanning && app.error.is_none() {
+                        app.scanning = true;
+                        app.needs_render = true;
+                        spawn_scan(tx.clone());
+                        *scan_spawned = true;
+                    }
+                }
+                CoreEvent::LiveMode { etw } => {
+                    app.live_mode = if etw { LiveMode::Etw } else { LiveMode::Polling };
+                    app.needs_render = true;
+                }
+                _ => {} // PortsScanned/NetworkChanged/TrafficUpdate consumed elsewhere
+            }
         }
 
         // Poll timeout: short when scanning (need to catch completion),
@@ -728,18 +766,8 @@ fn run_event_loop(
             spawn_scan(tx.clone());
             *scan_spawned = true;
         }
-
-        // Auto-refresh (D-11): trigger every 5 seconds when idle
-        if !app.scanning && app.error.is_none() {
-            if let Some(last) = app.last_auto_refresh {
-                if last.elapsed() >= AUTO_REFRESH_INTERVAL {
-                    app.scanning = true;
-                    app.needs_render = true;
-                    spawn_scan(tx.clone());
-                    *scan_spawned = true;
-                }
-            }
-        }
+        // (The former 5s AUTO_REFRESH block is replaced by the Phase 3
+        // poller-driven PollTick handler above — Wave 3.1, SCAN-05.)
     }
 
     Ok(())
@@ -1278,8 +1306,14 @@ fn render_status_bar(f: &mut Frame, area: Rect, app: &App, theme: &Theme) {
         f.render_widget(paragraph, area);
     } else {
         let now = chrono::Local::now().format("%H:%M:%S");
+        // Phase 3 (SCAN-05): the live label shows the refresh mode — the 2s
+        // poller today, "Live (ETW)" once the ETW change-trigger lands.
+        let live_label = match app.live_mode {
+            LiveMode::Polling => "Live (polling)",
+            LiveMode::Etw => "Live (ETW)",
+        };
         let spans = vec![
-            Span::styled("Live", base_style.fg(theme.fg_emphasis)),
+            Span::styled(live_label, base_style.fg(theme.fg_emphasis)),
             Span::styled(
                 format!(" \u{00b7} {} ports", app.ports.len()),
                 base_style.fg(theme.fg_default),
