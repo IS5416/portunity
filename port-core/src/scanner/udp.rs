@@ -129,6 +129,12 @@ fn is_ipv4_mapped(addr: &[u8; 16]) -> bool {
     addr[0..10].iter().all(|&b| b == 0) && addr[10] == 0xFF && addr[11] == 0xFF
 }
 
+/// Format a u32 IPv4 address from network byte order to dotted-decimal.
+fn format_ipv4(addr: u32) -> String {
+    let octets = u32::from_be(addr).to_be_bytes();
+    format!("{}.{}.{}.{}", octets[0], octets[1], octets[2], octets[3])
+}
+
 /// Build a Connection from MIB_UDPROW_OWNER_PID (IPv4 row, no remote info).
 ///
 /// Process name is left empty — `scan_all` batch-resolves names via
@@ -154,6 +160,7 @@ fn connection_from_udp_row(row: &MIB_UDPROW_OWNER_PID) -> Connection {
             user_protected: false,
             parent_pid: None,
         },
+        local_address: Some(format_ipv4(row.dwLocalAddr)),
         remote_address: None,
         remote_port: None,
         bytes_sent: 0,
@@ -185,6 +192,7 @@ fn connection_from_udp6_row(row: &MIB_UDP6ROW_OWNER_PID) -> Connection {
             user_protected: false,
             parent_pid: None,
         },
+        local_address: Some(super::tcp::format_ipv6(&row.ucLocalAddr)),
         remote_address: None,
         remote_port: None,
         bytes_sent: 0,

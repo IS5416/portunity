@@ -3,10 +3,15 @@
 use super::port::Port;
 
 /// A network connection tying a process to a local port and optional remote endpoint.
-#[derive(Debug, Clone)]
+///
+/// `local_address` is populated at scan time (Phase 3 history/traffic seam) —
+/// the OS reports it for every row but it was previously discarded.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Connection {
     pub port: Port,
     pub process: super::process::ProcessInfo,
+    /// Local address as a string ("" not used; `None` only when unavailable).
+    pub local_address: Option<String>,
     pub remote_address: Option<String>,
     pub remote_port: Option<u16>,
     pub bytes_sent: u64,
@@ -14,7 +19,7 @@ pub struct Connection {
 }
 
 /// A recorded change in port occupation.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct HistoryEntry {
     pub timestamp: chrono::DateTime<chrono::Utc>,
     pub event: HistoryEvent,
@@ -22,7 +27,7 @@ pub struct HistoryEntry {
     pub process: Option<super::process::ProcessInfo>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum HistoryEvent {
     Occupied,
     Released,
@@ -30,7 +35,7 @@ pub enum HistoryEvent {
 }
 
 /// Filter for querying history.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct HistoryFilter {
     pub port: Option<u16>,
     pub pid: Option<u32>,
@@ -40,7 +45,7 @@ pub struct HistoryFilter {
 }
 
 /// Real-time traffic statistics for a connection.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct TrafficStats {
     pub pid: u32,
     pub process_name: String,
@@ -53,7 +58,7 @@ pub struct TrafficStats {
 }
 
 /// A Windows Firewall rule.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct FirewallRule {
     pub name: String,
     pub direction: FirewallDirection,
@@ -66,20 +71,20 @@ pub struct FirewallRule {
     pub description: Option<String>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum FirewallDirection {
     Inbound,
     Outbound,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum FirewallAction {
     Allow,
     Block,
 }
 
 /// User-facing favorites and labels.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Favorite {
     pub port: u16,
     pub label: Option<String>,

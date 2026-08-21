@@ -169,7 +169,9 @@ fn format_ipv4(addr: u32) -> String {
 ///
 /// If the address is an IPv4-mapped IPv6 address (`::ffff:a.b.c.d`),
 /// the `is_ipv4_mapped` flag is set to true so the caller can deduplicate.
-fn format_ipv6(addr: &[u8; 16]) -> String {
+/// `pub(crate)` — reused by `udp.rs` for UDP6 local addresses (will move to
+/// `std::net` when the formatter is consolidated).
+pub(crate) fn format_ipv6(addr: &[u8; 16]) -> String {
     // Check for IPv4-mapped IPv6: first 10 bytes are 0, next 2 are 0xFF
     let is_mapped = addr[0..10].iter().all(|&b| b == 0)
         && addr[10] == 0xFF
@@ -289,6 +291,7 @@ fn connection_from_tcp_row(row: &MIB_TCPROW_OWNER_PID) -> Connection {
             user_protected: false,
             parent_pid: None,
         },
+        local_address: Some(format_ipv4(row.dwLocalAddr)),
         remote_address: remote_addr,
         remote_port,
         bytes_sent: 0,
@@ -337,6 +340,7 @@ fn connection_from_tcp6_row(row: &MIB_TCP6ROW_OWNER_PID) -> Connection {
             user_protected: false,
             parent_pid: None,
         },
+        local_address: Some(format_ipv6(&row.ucLocalAddr)),
         remote_address: remote_addr,
         remote_port,
         bytes_sent: 0,

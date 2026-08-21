@@ -1,7 +1,7 @@
 //! Filter/search data models.
 
 /// Multi-dimensional filter for port/connection queries.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct Filter {
     pub port_range: Option<(u16, u16)>,
     pub protocols: Vec<super::port::Protocol>,
