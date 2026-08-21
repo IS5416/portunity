@@ -265,7 +265,7 @@ fn run_event_loop(
                                                 tx_elevate.send(Message::ElevateDeclined);
                                         }
                                         Err(e) => {
-                                            let _ = tx_elevate.send(Message::ScanError(
+                                            let _ = tx_elevate.send(Message::ElevateFailed(
                                                 format!("Elevation failed: {}", e),
                                             ));
                                         }
@@ -750,6 +750,28 @@ fn run_event_loop(
 /// Handles mode-specific key dispatch: search mode, filter mode, and default mode.
 /// All non-overlay keys (r, q, j, k, s, etc.) pass through when search/filter is active.
 fn map_key_event(key: crossterm::event::KeyEvent, app: &App) -> Option<Message> {
+    // --- Confirm dialog dispatch (TOPMOST overlay — UI-SPEC L2-confirm) ---
+    // Hoisted ABOVE the search/filter blocks: the dialog renders on top of
+    // every other overlay, so its y/Enter/n/Esc/x keys must win regardless of
+    // whether the search bar or filter panel is also active. Previously the
+    // search (and filter) blocks ran first and swallowed the confirm keys,
+    // producing a stuck modal: open '/', move to a protected row, press 'x' —
+    // y/n/Enter became no-ops (TUI review W-1). Other keys still fall through
+    // to their normal dispatch (UI-SPEC confirm pass-through).
+    if app.confirm_pid.is_some() {
+        match key.code {
+            KeyCode::Char('y') | KeyCode::Enter => {
+                return Some(Message::KillConfirmed {
+                    pid: app.confirm_pid.unwrap_or(0),
+                });
+            }
+            KeyCode::Char('n') | KeyCode::Esc => return Some(Message::KillCancelled),
+            KeyCode::Char('x') => return None, // no-op: prevents re-triggering kill (UI-SPEC)
+            // Pass-through: all other keys keep working (UI-SPEC confirm table)
+            _ => {}
+        }
+    }
+
     // --- Search mode dispatch ---
     if app.search_active {
         match key.code {
@@ -790,21 +812,6 @@ fn map_key_event(key: crossterm::event::KeyEvent, app: &App) -> Option<Message> 
             }
             KeyCode::Backspace => return Some(Message::FilterFieldBackspace),
             // Pass-through: j, k, r, s continue to work
-            _ => {}
-        }
-    }
-
-    // --- Confirm dialog dispatch (topmost overlay — UI-SPEC L2-confirm) ---
-    if app.confirm_pid.is_some() {
-        match key.code {
-            KeyCode::Char('y') | KeyCode::Enter => {
-                return Some(Message::KillConfirmed {
-                    pid: app.confirm_pid.unwrap_or(0),
-                });
-            }
-            KeyCode::Char('n') | KeyCode::Esc => return Some(Message::KillCancelled),
-            KeyCode::Char('x') => return None, // no-op: prevents re-triggering kill (UI-SPEC)
-            // Pass-through: all other keys keep working (UI-SPEC confirm table)
             _ => {}
         }
     }
@@ -1499,5 +1506,73 @@ fn truncate_footer_name(s: &str, max_len: usize) -> String {
         format!("{}\u{2026}", truncated)
     } else {
         s.to_string()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crossterm::event::{KeyEvent, KeyModifiers};
+
+    fn key(code: KeyCode) -> KeyEvent {
+        KeyEvent::new(code, KeyModifiers::NONE)
+    }
+
+    /// The confirm dialog is the topmost overlay, so its keys must win even
+    /// when the search bar and/or filter panel are also active. Regression for
+    /// the stuck-modal ordering bug: search/filter used to dispatch before the
+    /// confirm block, swallowing y/n/Enter after 'x' on a protected row.
+    #[test]
+    fn confirm_dispatch_beats_search_and_filter() {
+        let mut app = App::new();
+        app.confirm_pid = Some(42);
+        app.search_active = true;
+        app.filter_active = true;
+
+        assert!(
+            matches!(
+                map_key_event(key(KeyCode::Char('y')), &app),
+                Some(Message::KillConfirmed { pid: 42 })
+            ),
+            "confirm 'y' must be reachable with search+filter active"
+        );
+        assert!(matches!(
+            map_key_event(key(KeyCode::Char('n')), &app),
+            Some(Message::KillCancelled)
+        ));
+        assert!(matches!(
+            map_key_event(key(KeyCode::Esc), &app),
+            Some(Message::KillCancelled)
+        ));
+        // 'x' while a dialog is open is a no-op (prevents re-triggering kill).
+        assert!(map_key_event(key(KeyCode::Char('x')), &app).is_none());
+    }
+
+    /// Without a dialog, printable chars reach the search input as before —
+    /// the hoist must not change normal search dispatch.
+    #[test]
+    fn search_keys_work_when_no_confirm_dialog() {
+        let mut app = App::new();
+        app.confirm_pid = None;
+        app.search_active = true;
+        assert!(matches!(
+            map_key_event(key(KeyCode::Char('y')), &app),
+            Some(Message::SearchInput('y'))
+        ));
+    }
+
+    /// A confirm dialog still lets non-confirm keys (e.g. universal commands)
+    /// pass through to the table, per the UI-SPEC confirm pass-through table.
+    #[test]
+    fn confirm_passes_through_other_keys() {
+        let mut app = App::new();
+        app.confirm_pid = Some(7);
+        app.search_active = false;
+        // 'r' (refresh) is a universal default-dispatch key, not consumed by the
+        // dialog — it must still produce its Refresh message.
+        assert!(matches!(
+            map_key_event(key(KeyCode::Char('r')), &app),
+            Some(Message::Refresh)
+        ));
     }
 }

@@ -159,6 +159,12 @@ pub enum Message {
     /// UAC prompt was declined; continue in non-admin mode.
     ElevateDeclined,
 
+    /// Elevation attempt failed with a non-decline error (ShellExecuteExW
+    /// failure while re-launching). Resets `app.elevating` so the 'a' key can
+    /// be retried later in the session (previously only ElevateDeclined
+    /// cleared the guard, leaving 'a' dead after a hard failure).
+    ElevateFailed(String),
+
     /// Switch to a tab by index (0=Overview, 1=Ports, 2=History, 3=Traffic, 4=Firewall).
     SwitchTab(usize),
 

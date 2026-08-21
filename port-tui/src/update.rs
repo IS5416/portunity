@@ -207,6 +207,13 @@ pub fn update(app: &mut App, msg: Message) {
             // UAC was declined — app continues in non-admin mode (D-07)
             app.elevating = false;
         }
+        Message::ElevateFailed(e) => {
+            // Hard elevation failure (not a decline). Reset the elevating guard
+            // (only ElevateDeclined did before — this latched-once bug left 'a'
+            // dead for the session) and surface the error in the status bar.
+            app.elevating = false;
+            app.error = Some(e);
+        }
 
         Message::SwitchTab(index) => {
             if index < 5 {
