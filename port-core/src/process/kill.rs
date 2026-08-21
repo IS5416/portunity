@@ -175,23 +175,28 @@ fn kill_blocking(
 
     let pid = snapshot.pid;
 
-    // Step 4: Probe visible windows via EnumWindows. The probe is keyed on
-    // the VERIFIED handle, not the raw PID (WR-02): the callback compares
-    // the window's PID against GetProcessId(handle) — the handle keeps the
-    // process object alive, so the numeric PID cannot be recycled and a
+    // Step 4/5: probe + route via route_strategy (IN-01 — keep the pure
+    // decision fn as the single point of truth instead of an inlined branch).
+    // The WM_CLOSE probe keys on the VERIFIED handle (WR-02): the callback
+    // compares the window's PID against GetProcessId(handle) — the handle keeps
+    // the process object alive, so the numeric PID cannot be recycled and a
     // matching window is guaranteed to belong to the verified process.
-    // WM_CLOSE is never posted to a PID-reused impostor.
     let has_visible_windows = has_visible_window(handle.handle);
-
-    let graceful_dispatched = if has_visible_windows {
-        // Send WM_CLOSE to the first visible top-level window.
-        // UIPI may silently block cross-integrity — the timeout handles that.
+    if has_visible_windows {
         post_wm_close(handle.handle);
-        true
-    } else {
-        // Step 5: Try the Ctrl+C helper (also serves as console probe).
-        // Exit code 0 = delivered, 1 = no console → force directly.
-        spawn_ctrl_c_helper(pid) == 0
+    }
+
+    // The Ctrl+C helper doubles as the console probe, returning 0 when the
+    // signal was delivered (a console existed), non-zero otherwise. It runs
+    // ONLY when there are no visible windows (a console process) and exactly
+    // once — the probe both detects the console and delivers the signal, so
+    // this preserves the original behavior while feeding route_strategy.
+    let has_console = !has_visible_windows && spawn_ctrl_c_helper(pid) == 0;
+    let strategy = route_strategy(has_visible_windows, has_console);
+
+    let graceful_dispatched = match strategy {
+        Strategy::WmClose | Strategy::ConsoleCtrlC => true,
+        Strategy::ForceDirect => false,
     };
 
     if !graceful_dispatched {

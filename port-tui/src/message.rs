@@ -170,9 +170,8 @@ pub enum Message {
 
     // --- Kill flow messages (D-01..D-04, D-09) ---
     //
-    // KillPrepared / KillExecute are internal flow messages beyond the UI-SPEC
-    // list (the UI-SPEC list covers user-facing messages; the two-stage gate
-    // needs the extra hops). KillPrepared carries the Send-safe snapshot +
+    // KillPrepared is an internal flow message beyond the UI-SPEC list (the
+    // two-stage gate needs the extra hop). It carries the Send-safe snapshot +
     // protection verdict so the drain loop can route: None -> instant kill,
     // UserConfirm -> dialog, HardBlocked -> status message only.
 
@@ -202,15 +201,6 @@ pub enum Message {
         pid: u32,
         timeout_secs: u64,
     },
-
-    /// (Internal) execute the kill with an already-prepared snapshot.
-    ///
-    /// Declared per the plan's message contract (02-01 Task 2 step 1) for the
-    /// two-stage gate; the current flow intercepts KillPrepared directly in the
-    /// drain loop, so this variant is constructed by no producer yet — plan 02-03
-    /// (whitelist overlay) and future kill paths may emit it.
-    #[allow(dead_code)]
-    KillExecute { snapshot: ProcessSnapshot },
 
     /// Final kill outcome for the status bar (D-04).
     KillOutcome {

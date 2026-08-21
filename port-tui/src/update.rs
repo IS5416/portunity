@@ -299,9 +299,6 @@ pub fn update(app: &mut App, msg: Message) {
                 tone: KillTone::InProgress,
             });
         }
-        Message::KillExecute { .. } => {
-            // Handled by the main event loop (intercept-owned).
-        }
         // --- Detail panel handlers (D-05..D-08, PROC-06) ---
 
         Message::ToggleDetailPanel => {
