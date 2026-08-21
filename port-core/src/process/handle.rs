@@ -155,28 +155,44 @@ pub fn open_verified(snapshot: &ProcessSnapshot) -> crate::Result<OpenProcessHan
     }
 
     // Verify creation time (suspenders — Pitfall #1)
-    if let Some(expected_ct) = snapshot.creation_time {
-        let mut actual_ct = FILETIME::default();
-        let mut exit = FILETIME::default();
-        let mut kernel = FILETIME::default();
-        let mut user = FILETIME::default();
+    match snapshot.creation_time {
+        Some(expected_ct) => {
+            let mut actual_ct = FILETIME::default();
+            let mut exit = FILETIME::default();
+            let mut kernel = FILETIME::default();
+            let mut user = FILETIME::default();
 
-        unsafe {
-            GetProcessTimes(h.handle, &mut actual_ct, &mut exit, &mut kernel, &mut user)
-                .map_err(|e| {
-                    crate::Error::Platform(format!("GetProcessTimes failed: {:?}", e))
-                })?;
+            unsafe {
+                GetProcessTimes(h.handle, &mut actual_ct, &mut exit, &mut kernel, &mut user)
+                    .map_err(|e| {
+                        crate::Error::Platform(format!("GetProcessTimes failed: {:?}", e))
+                    })?;
+            }
+
+            if !creation_matches(actual_ct, expected_ct) {
+                return Err(crate::Error::NotFound(format!(
+                    "Process {} replaced — creation time mismatch",
+                    snapshot.pid
+                )));
+            }
         }
-
-        if !creation_matches(actual_ct, expected_ct) {
+        // `None` creation time: for a normal (non-pseudo) process we FAIL
+        // CLOSED rather than degrade to a tautological PID-only check. The
+        // PID "belt" adds nothing when we just opened a handle by that PID;
+        // only creation time is meaningful, and without it we cannot prove the
+        // snapshot still refers to a live process (PROC-07, review: PID-only
+        // degradation was the residual risk). PID 0/4 pseudo-processes are an
+        // explicit exception — they have no creation time by definition and are
+        // hard-blocked by the whitelist before any kill could reach this point.
+        None if snapshot.pid == 0 || snapshot.pid == 4 => {}
+        None => {
             return Err(crate::Error::NotFound(format!(
-                "Process {} replaced — creation time mismatch",
+                "Cannot verify identity of PID {} — no creation-time snapshot; \
+                 refusing PID-only kill",
                 snapshot.pid
             )));
         }
     }
-    // If snapshot.creation_time is None (pre-Phase-2 scan rows), skip the
-    // creation-time check — PID check alone is the best we can do.
 
     Ok(h)
 }
@@ -307,5 +323,42 @@ mod tests {
         assert_eq!(snap.pid, 4);
         assert!(snap.creation_time.is_none());
         assert!(snap.executable_path.is_none());
+    }
+
+    /// A real (non-pseudo) process whose snapshot has no creation time must be
+    /// refused — PROC-07 may not degrade to a PID-only verification. We use the
+    /// current process as the target (OpenProcess on own PID succeeds and
+    /// GetProcessId matches), so the None creation_time is the only failure.
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn open_verified_refuses_none_creation_time() {
+        let snap = ProcessSnapshot {
+            pid: std::process::id(),
+            creation_time: None,
+            executable_path: None,
+        };
+        let err = open_verified(&snap).err().expect("PID-only kill must be refused");
+        assert!(
+            matches!(err, crate::Error::NotFound(_)),
+            "expected NotFound, got: {:?}",
+            err
+        );
+    }
+
+    /// PID 0 / 4 pseudo-processes keep the legacy exception: no creation time,
+    /// but they are hard-blocked by the whitelist before any kill reaches
+    /// open_verified, so returning Ok here preserves the existing contract.
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn open_verified_allows_pseudo_process_none_creation_time() {
+        // PID 0 has no OS process to open — OpenProcess fails with a
+        // platform error (not the NotFound we assert for the None case),
+        // which confirms PID 0 never reaches the verification branch.
+        let snap = ProcessSnapshot {
+            pid: 0,
+            creation_time: None,
+            executable_path: None,
+        };
+        assert!(open_verified(&snap).is_err());
     }
 }

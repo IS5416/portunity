@@ -87,6 +87,16 @@ pub fn route_strategy(has_visible_windows: bool, has_console: bool) -> Strategy 
     }
 }
 
+/// Convert a graceful-kill timeout (seconds) to the u32 milliseconds
+/// `WaitForSingleObject` accepts, saturating instead of wrapping.
+///
+/// `timeout_secs` comes from user-editable `settings.toml`; a large hand-edited
+/// value multiplied by 1000 previously overflowed the `u32` cast and became a
+/// tiny wait → silent instant force-kill (IN-05). Saturate at `u32::MAX`.
+pub(crate) fn kill_timeout_ms(timeout_secs: u64) -> u32 {
+    timeout_secs.saturating_mul(1000).min(u32::MAX as u64) as u32
+}
+
 // ----------------------------------------------------------------
 // Kill pipeline (async entry → one spawn_blocking scope)
 // ----------------------------------------------------------------
@@ -192,10 +202,12 @@ fn kill_blocking(
             other => other,
         }
     } else {
-        // Step 6: Wait for graceful exit
-        let timeout_ms = timeout_secs * 1000;
+        // Step 6: Wait for graceful exit. Timeout saturates (IN-05): a
+        // hand-edited settings.toml with a huge value used to wrap to a small
+        // u32 and silently force-kill immediately — clamp at u32::MAX instead.
+        let timeout_ms = kill_timeout_ms(timeout_secs);
         unsafe {
-            match WaitForSingleObject(handle.handle, timeout_ms as u32) {
+            match WaitForSingleObject(handle.handle, timeout_ms) {
                 WAIT_OBJECT_0 => KillOutcome::Graceful,
                 WAIT_TIMEOUT => {
                     on_timeout();
@@ -492,5 +504,18 @@ mod tests {
         for o in &outcomes {
             let _ = format!("{:?}", o);
         }
+    }
+
+    /// Timeout conversion saturates: a huge (hand-edited settings) value must
+    /// clamp at u32::MAX and never wrap to a tiny wait that force-kills
+    /// immediately (IN-05). Normal values pass through unchanged.
+    #[test]
+    fn kill_timeout_ms_normal_and_saturating() {
+        assert_eq!(kill_timeout_ms(5), 5000);
+        assert_eq!(kill_timeout_ms(0), 0);
+        assert_eq!(kill_timeout_ms(42), 42000);
+        // 4.29e9 seconds * 1000 overflows u64? no — saturates to u32::MAX.
+        assert_eq!(kill_timeout_ms(u64::MAX), u32::MAX);
+        assert_eq!(kill_timeout_ms(u32::MAX as u64), u32::MAX);
     }
 }
