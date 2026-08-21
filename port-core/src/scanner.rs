@@ -159,6 +159,7 @@ mod tests {
                 user_protected: false,
                 parent_pid: None,
             },
+            local_address: None,
             remote_address: None,
             remote_port: None,
             bytes_sent: 0,
